@@ -4,6 +4,9 @@ plugins {
     id 'maven-publish'
 }
 
+group = 'com.github.legend295'
+version = '1.0'
+
 android {
     namespace 'com.scanner'
     compileSdk 34
