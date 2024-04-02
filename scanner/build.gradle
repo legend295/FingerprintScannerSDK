@@ -7,9 +7,9 @@ plugins {
     id 'signing'
 //    id 'com.github.dcendents.android-maven'
 }
-
-group = 'com.github.legend295'
-version = '1.0'
+//
+//group = 'com.github.legend295'
+//version = '1.0'
 
 android {
     namespace 'com.scanner'
@@ -47,7 +47,7 @@ android {
 }
 
 
-afterEvaluate{
+/*afterEvaluate{
     publishing {
         publications {
             mavenJava(MavenPublication){
@@ -58,7 +58,7 @@ afterEvaluate{
             }
         }
     }
-}
+}*/
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
