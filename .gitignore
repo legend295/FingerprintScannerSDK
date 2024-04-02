@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+scanner/gradle.properties
+gradle.properties
