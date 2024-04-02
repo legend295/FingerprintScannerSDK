@@ -3,7 +3,7 @@ plugins {
     id 'org.jetbrains.kotlin.android'
     id 'maven-publish'
 //    id 'com.vanniktech.maven.publish.gradle.plugin'
-    id "com.vanniktech.maven.publish" version "0.28.0"
+//    id "com.vanniktech.maven.publish" version "0.28.0"
     id 'signing'
 //    id 'com.github.dcendents.android-maven'
 }
@@ -44,6 +44,12 @@ android {
         // or when publishing to https://s01.oss.sonatype.org
         publishToMavenCentral(SonatypeHost.S01, true)
     }*/
+    publishing {
+        singleVariant('release') {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
 
 
@@ -69,5 +75,5 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     implementation 'com.github.dcendents:android-maven-gradle-plugin:2.1'
-    implementation 'com.vanniktech.maven.publish:com.vanniktech.maven.publish.gradle.plugin:0.28.0'
+//    implementation 'com.vanniktech.maven.publish:com.vanniktech.maven.publish.gradle.plugin:0.28.0'
 }
