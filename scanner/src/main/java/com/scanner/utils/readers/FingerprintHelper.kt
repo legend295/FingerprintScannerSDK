@@ -133,6 +133,16 @@ internal class FingerprintHelper(
             sessionHelper.onSessionChanges(readerStatus)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
             false
+        } catch (e: ExceptionInInitializerError) {
+            readerStatus = ReaderStatus.INIT_FAILED
+            sessionHelper.onSessionChanges(readerStatus)
+            Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            false
+        } catch (e: NoClassDefFoundError) {
+            readerStatus = ReaderStatus.INIT_FAILED
+            sessionHelper.onSessionChanges(readerStatus)
+            Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            false
         }
     }
 

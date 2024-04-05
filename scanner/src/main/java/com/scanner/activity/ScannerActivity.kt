@@ -20,6 +20,7 @@ import com.scanner.utils.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
 import com.scanner.utils.readers.FingerprintHelper
 import com.github.legend295.fingerprintscanner.R
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -36,8 +37,15 @@ class ScannerActivity : AppCompatActivity(),
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scanner)
         tvStatus = findViewById(R.id.tvStatus)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                fingerprintHelper.init()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
         lifecycleScope.launch(Dispatchers.IO) {
-            fingerprintHelper.init()
+
         }
         tvStatus?.setOnClickListener {
             if (checkStorageAndCameraPermission()) {
@@ -57,6 +65,7 @@ class ScannerActivity : AppCompatActivity(),
 
             ReaderStatus.SESSION_CLOSED, ReaderStatus.INIT_FAILED -> {
                 //first call cancel tap function of readers and then re-initialize the readers
+                setMessage("Retrying...")
                 fingerprintHelper.cancelTap()
                 fingerprintHelper.init()
             }
@@ -65,6 +74,7 @@ class ScannerActivity : AppCompatActivity(),
             ReaderStatus.FINGERS_RELEASED -> {
 //                fingerprintHelper.waitFingerRead(difFingerprintReadInfo)
             }
+
             ReaderStatus.FINGERS_READ_SUCCESS -> {
 //                fingerprintHelper.waitFingerRead(difFingerprintReadInfo)
             }

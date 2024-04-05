@@ -541,7 +541,7 @@ internal class FingerprintReader(
                     "WaxdPosLib",
                     "FingerprintReader[$readerNo]::Scan -> timeStop = $timeStop"
                 )
-                extractResult = nbContext.extract(
+                /*extractResult = nbContext.extract(
                     NBBiometricsTemplateType.ISO,
                     NBBiometricsFingerPosition.UNKNOWN,
                     scanFormatInfo,
@@ -572,7 +572,7 @@ internal class FingerprintReader(
                 Log.d(
                     "WaxdPosLib",
                     "FingerprintReader[$readerNo]::Scan -> result = listOfTemplate - ${listOfTemplate.size}"
-                )
+                )*/
             } catch (e: java.lang.Exception) {
                 Log.e(
                     "WaxdPosLib",

@@ -32,11 +32,11 @@ android {
         jvmTarget = '17'
     }
 
-    /*sourceSets {
+    sourceSets {
         main {
             jniLibs.srcDirs = ['libs']
         }
-    }*/
+    }
 }
 
 afterEvaluate {
