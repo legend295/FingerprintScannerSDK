@@ -4,15 +4,15 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".MainActivity">
+    tools:context=".activity.ScannerActivity">
 
     <androidx.appcompat.widget.AppCompatTextView
-        android:layout_width="wrap_content"
+        android:id="@+id/tvStatus"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="@string/start_scan"
-        android:textSize="20sp"
-        android:id="@+id/tvStartScan"
-        app:layout_constraintBottom_toBottomOf="parent"
+        android:padding="10dp"
+        android:text="@string/initializing"
+        android:textSize="25sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">FingerprintScannerSDK</string>
+    <string name="start_scan">Start Scan</string>
 </resources>

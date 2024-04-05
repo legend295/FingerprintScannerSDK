@@ -1,0 +1,9 @@
+<resources>
+    <string name="initializing">Initializing…</string>
+    <string name="service_bounded">Service bounded</string>
+    <string name="initializing_failed">Initializing failed, Retry</string>
+    <string name="session_closed_retry">Session closed retry</string>
+    <string name="fingers_detected">Fingers detected. Please remove fingers.</string>
+    <string name="scan">Scan</string>
+    <string name="read_success">Finger Read Success</string>
+</resources>

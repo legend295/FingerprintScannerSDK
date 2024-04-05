@@ -3,17 +3,22 @@ plugins {
     id 'org.jetbrains.kotlin.android'
     id 'maven-publish'
 //    id 'com.vanniktech.maven.publish.gradle.plugin'
-//    id "com.vanniktech.maven.publish" version "0.28.0"
+    id "com.vanniktech.maven.publish" version "0.28.0"
     id 'signing'
 //    id 'com.github.dcendents.android-maven'
 }
 //
-//group = 'com.github.legend295'
+//group = 'io.github.legend295'
 //version = '1.0'
 
 android {
-    namespace 'com.scanner'
+    namespace 'io.github.legend295.fingerprintscanner'
     compileSdk 34
+    /*publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }*/
 
     defaultConfig {
         minSdk 24
@@ -44,10 +49,16 @@ android {
         // or when publishing to https://s01.oss.sonatype.org
         publishToMavenCentral(SonatypeHost.S01, true)
     }*/
-    publishing {
+    /*publishing {
         singleVariant('release') {
             withSourcesJar()
             withJavadocJar()
+        }
+    }*/
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['libs']
         }
     }
 }
@@ -57,8 +68,8 @@ android {
     publishing {
         publications {
             mavenJava(MavenPublication){
-                from components.findByName('java')
-                groupId = 'com.github.legend295'
+                from components.findByName('release')
+                groupId = 'io.github.legend295'
                 artifactId = 'FingerprintScannerSDK'
                 version = '1.0'
             }
@@ -67,13 +78,17 @@ android {
 }*/
 
 dependencies {
-    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'], exclude: [])
+    implementation files('libs/nextbiometrics-biometrics-android.jar')
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     implementation 'com.github.dcendents:android-maven-gradle-plugin:2.1'
 //    implementation 'com.vanniktech.maven.publish:com.vanniktech.maven.publish.gradle.plugin:0.28.0'
 }
+
+apply from: '../publish-package.gradle'
