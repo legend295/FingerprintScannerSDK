@@ -19,7 +19,7 @@ import com.nextbiometrics.biometrics.NBBiometricsExtractResult
 import com.scanner.utils.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
 import com.scanner.utils.readers.FingerprintHelper
-import io.github.legend295.fingerprintscanner.R
+import com.github.legend295.fingerprintscanner.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 

@@ -12,7 +12,7 @@ plugins {
 //version = '1.0'
 
 android {
-    namespace 'io.github.legend295.fingerprintscanner'
+    namespace 'com.github.legend295.fingerprintscanner'
     compileSdk 34
     /*publishing {
         singleVariant("release") {
@@ -77,6 +77,19 @@ android {
     }
 }*/
 
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.github.legend295'
+                artifactId = 'FingerprintScannerSDK'
+                version = '1.0.2'
+            }
+        }
+    }
+}
+
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'], exclude: [])
     implementation files('libs/nextbiometrics-biometrics-android.jar')
@@ -91,4 +104,4 @@ dependencies {
 //    implementation 'com.vanniktech.maven.publish:com.vanniktech.maven.publish.gradle.plugin:0.28.0'
 }
 
-apply from: '../publish-package.gradle'
+//apply from: '../publish-package.gradle'
