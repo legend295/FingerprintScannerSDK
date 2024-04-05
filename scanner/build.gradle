@@ -90,6 +90,7 @@ afterEvaluate {
     }
 }
 
+//test
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'], exclude: [])
     implementation files('libs/nextbiometrics-biometrics-android.jar')
