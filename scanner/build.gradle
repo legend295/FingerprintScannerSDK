@@ -7,18 +7,10 @@ plugins {
     id 'signing'
 //    id 'com.github.dcendents.android-maven'
 }
-//
-//group = 'io.github.legend295'
-//version = '1.0'
 
 android {
     namespace 'com.github.legend295.fingerprintscanner'
     compileSdk 34
-    /*publishing {
-        singleVariant("release") {
-            withSourcesJar()
-        }
-    }*/
 
     defaultConfig {
         minSdk 24
@@ -39,43 +31,13 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
-/*
-    testFixtures {
-        enable = true
-    }*/
 
-   /* mavenPublishing {
-        publishToMavenCentral(SonatypeHost.DEFAULT, true)
-        // or when publishing to https://s01.oss.sonatype.org
-        publishToMavenCentral(SonatypeHost.S01, true)
-    }*/
-    /*publishing {
-        singleVariant('release') {
-            withSourcesJar()
-            withJavadocJar()
-        }
-    }*/
-
-    sourceSets {
+    /*sourceSets {
         main {
             jniLibs.srcDirs = ['libs']
         }
-    }
+    }*/
 }
-
-
-/*afterEvaluate{
-    publishing {
-        publications {
-            mavenJava(MavenPublication){
-                from components.findByName('release')
-                groupId = 'io.github.legend295'
-                artifactId = 'FingerprintScannerSDK'
-                version = '1.0'
-            }
-        }
-    }
-}*/
 
 afterEvaluate {
     publishing {
