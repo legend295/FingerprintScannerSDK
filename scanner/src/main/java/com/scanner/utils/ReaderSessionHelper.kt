@@ -1,5 +1,5 @@
 package com.scanner.utils
 
-interface ReaderSessionHelper {
+internal interface ReaderSessionHelper {
     fun onSessionChanges(readerStatus: ReaderStatus)
 }

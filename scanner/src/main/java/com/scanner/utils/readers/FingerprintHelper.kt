@@ -14,7 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-class FingerprintHelper(
+internal class FingerprintHelper(
     private val context: Context,
     private var sessionHelper: ReaderSessionHelper,
     private val listOfTemplate: ArrayList<NBBiometricsExtractResult>

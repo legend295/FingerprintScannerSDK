@@ -33,7 +33,7 @@ import java.io.IOException
 import java.nio.IntBuffer
 import java.util.AbstractMap
 
-class FingerprintReader(
+internal class FingerprintReader(
     val context: Context,
     private var reader: NBDevice?,
     private val readerNo: Int, private val listOfTemplate: ArrayList<NBBiometricsExtractResult>
