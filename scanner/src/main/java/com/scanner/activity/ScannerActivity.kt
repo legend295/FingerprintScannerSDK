@@ -1,6 +1,7 @@
 package com.scanner.activity
 
 import android.Manifest
+import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,29 +15,44 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
-import androidx.lifecycle.lifecycleScope
 import com.nextbiometrics.biometrics.NBBiometricsExtractResult
-import com.scanner.utils.ReaderSessionHelper
+import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
 import com.scanner.utils.readers.FingerprintHelper
 import com.github.legend295.fingerprintscanner.R
+import com.scanner.utils.constants.Constant.FINGER_PRINT_READ_INFO
+import com.scanner.utils.constants.ScannerConstants
+import com.scanner.utils.helper.OnFileSavedListener
+import com.scanner.utils.readersInitializationDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
 
 class ScannerActivity : AppCompatActivity(),
     ReaderSessionHelper {
 
     private var tvStatus: AppCompatTextView? = null
+    private val list: ArrayList<File> = ArrayList()
     private val listOfTemplate = ArrayList<NBBiometricsExtractResult>()
-    private val fingerprintHelper by lazy { FingerprintHelper(this, this, listOfTemplate) }
+    private val fingerprintHelper by lazy {
+        FingerprintHelper(
+            this,
+            this,
+            listOfTemplate,
+            onFileSavedListener
+        )
+    }
     private var readerStatus: ReaderStatus = ReaderStatus.NONE
     private val tag = ScannerActivity::class.java.simpleName
-    private val difFingerprintReadInfo = "100,0,1.0"
+    private val difFingerprintReadInfo = FINGER_PRINT_READ_INFO
+    private var dialog: Pair<Dialog, AppCompatTextView>? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scanner)
+        dialog = readersInitializationDialog()
         tvStatus = findViewById(R.id.tvStatus)
+        // Initialize Fingerprint readers on background thread on main thread UI will stuck
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 fingerprintHelper.init()
@@ -44,9 +60,7 @@ class ScannerActivity : AppCompatActivity(),
                 e.printStackTrace()
             }
         }
-        lifecycleScope.launch(Dispatchers.IO) {
 
-        }
         tvStatus?.setOnClickListener {
             if (checkStorageAndCameraPermission()) {
                 handleClick()
@@ -66,6 +80,7 @@ class ScannerActivity : AppCompatActivity(),
             ReaderStatus.SESSION_CLOSED, ReaderStatus.INIT_FAILED -> {
                 //first call cancel tap function of readers and then re-initialize the readers
                 setMessage("Retrying...")
+                list.clear()
                 fingerprintHelper.cancelTap()
                 fingerprintHelper.init()
             }
@@ -83,7 +98,6 @@ class ScannerActivity : AppCompatActivity(),
             ReaderStatus.FINGERS_DETECTED -> {}
             ReaderStatus.TAP_CANCELLED -> {
                 fingerprintHelper.stop()
-                fingerprintHelper.close()
             }
         }
     }
@@ -94,22 +108,28 @@ class ScannerActivity : AppCompatActivity(),
     }
 
     override fun onSessionChanges(readerStatus: ReaderStatus) {
-//        readerSessionHelper.onSessionChanges(readerStatus)
         this.readerStatus = readerStatus
         when (readerStatus) {
             ReaderStatus.NONE -> {
                 //Initial value of the readers and readers are not initialized in this phase
                 setMessage(getString(R.string.initializing))
+                runOnUiThread {
+                    dialog?.first?.show()
+                }
             }
 
             ReaderStatus.SERVICE_BOUND -> {
                 //Start scanning process readers are initialized
                 setMessage(getString(R.string.scan))
-                if (fingerprintHelper.start()) {
-                    Log.d(tag, "START OK")
-                } else {
-                    Log.d(tag, "START FAILED")
+                runOnUiThread {
+                    dialog?.second?.text = "Initialized"
+                    dialog?.first?.dismiss()
                 }
+                    if (fingerprintHelper.start()) {
+                        Log.d(tag, "START OK")
+                    } else {
+                        Log.d(tag, "START FAILED")
+                    }
             }
 
             ReaderStatus.INIT_FAILED -> {
@@ -122,6 +142,11 @@ class ScannerActivity : AppCompatActivity(),
                 fingerprintHelper.waitFingersRelease()
                 setMessage(getString(R.string.read_success))
                 enableLowPowerMode()
+                val intent = Intent()
+                intent.putExtra(ScannerConstants.DATA, list)
+                setResult(RESULT_OK, intent)
+                finish()
+
             }
 
             ReaderStatus.FINGERS_READ_FAILED -> {}
@@ -143,18 +168,33 @@ class ScannerActivity : AppCompatActivity(),
         }
     }
 
+    //Listener is registered when file saved in storage
+    private val onFileSavedListener = object : OnFileSavedListener {
+        override fun onSuccess(path: String) {
+            val file = File(path)
+            Log.d(ScannerActivity::class.simpleName, file.name)
+            list.add(file)
+
+        }
+
+        override fun onFailure(e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     private fun setMessage(message: String) {
         runOnUiThread {
             tvStatus?.text = message
         }
     }
 
+    //Enable low power mode when finger scanning success
     private fun enableLowPowerMode() = fingerprintHelper.enableLowPowerMode()
 
     override fun onDestroy() {
         super.onDestroy()
+        enableLowPowerMode()
         fingerprintHelper.stop()
-        fingerprintHelper.close()
     }
 
     private fun checkStorageAndCameraPermission(): Boolean {

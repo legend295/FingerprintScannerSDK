@@ -5,6 +5,7 @@ plugins {
 //    id 'com.vanniktech.maven.publish.gradle.plugin'
     id "com.vanniktech.maven.publish" version "0.28.0"
     id 'signing'
+    id 'kotlin-kapt'
 //    id 'com.github.dcendents.android-maven'
 }
 
@@ -36,6 +37,12 @@ android {
         main {
             jniLibs.srcDirs = ['libs']
         }
+    }
+
+    /* android.buildFeatures.dataBinding = true
+     android.buildFeatures.viewBinding = true*/
+    buildFeatures {
+        dataBinding = true
     }
 }
 

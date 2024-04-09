@@ -1,23 +1,20 @@
 package com.scanner.utils.readers
 
 import android.content.Context
-import android.os.Looper
-import android.os.Messenger
 import android.util.Log
-import androidx.lifecycle.LifecycleCoroutineScope
 import com.common.apiutil.powercontrol.PowerControl
 import com.nextbiometrics.biometrics.NBBiometricsExtractResult
 import com.nextbiometrics.devices.NBDevices
-import com.scanner.utils.ReaderSessionHelper
+import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import com.scanner.utils.helper.OnFileSavedListener
 import org.json.JSONObject
 
 internal class FingerprintHelper(
     private val context: Context,
     private var sessionHelper: ReaderSessionHelper,
-    private val listOfTemplate: ArrayList<NBBiometricsExtractResult>
+    private val listOfTemplate: ArrayList<NBBiometricsExtractResult>,
+    private val listener: OnFileSavedListener
 ) {
 
     private var reader = arrayOf<FingerprintReader?>(null, null)
@@ -82,14 +79,14 @@ internal class FingerprintHelper(
             if (devices.isEmpty()) {
                 err = "No fingerprint reader found"
                 Log.d("WaxdPosLib", "FingerPrintService::Init -> No fingerprint reader found")
-                readerInfo = "No finderprint reader"
+                readerInfo = "No fingerprint reader"
                 readerStatus = ReaderStatus.INIT_FAILED
                 sessionHelper.onSessionChanges(readerStatus)
                 return false
             }
             numReaders = 0
             for (i in 0..1) {
-                reader[i] = FingerprintReader(context, devices[i], i, listOfTemplate)
+                reader[i] = FingerprintReader(context, devices[i], i, listOfTemplate, listener)
                 if (reader[i]?.init() != true) {
                     Log.d(
                         "WaxdPosLib",
@@ -315,7 +312,7 @@ internal class FingerprintHelper(
         savePath = path
     }
 
-    fun close() {
+    private fun close() {
         Log.d("WaxdPosLib", "FingerPrintService::Close...")
         try {
             for (i in 0 until numReaders) {

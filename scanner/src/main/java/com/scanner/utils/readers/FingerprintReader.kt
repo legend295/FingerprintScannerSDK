@@ -24,6 +24,7 @@ import com.nextbiometrics.devices.NBDeviceScanResult
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.system.NextBiometricsException
+import com.scanner.utils.helper.OnFileSavedListener
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.File
@@ -36,7 +37,8 @@ import java.util.AbstractMap
 internal class FingerprintReader(
     val context: Context,
     private var reader: NBDevice?,
-    private val readerNo: Int, private val listOfTemplate: ArrayList<NBBiometricsExtractResult>
+    private val readerNo: Int, private val listOfTemplate: ArrayList<NBBiometricsExtractResult>,
+    private val listener: OnFileSavedListener
 ) {
     private var scanFormatInfo: NBDeviceScanFormatInfo? = null
     private var serialNo = ""
@@ -697,12 +699,14 @@ internal class FingerprintReader(
             val fos = FileOutputStream(filePath)
             fos.write(imageData)
             fos.close()
+            listener.onSuccess(filePath)
             Log.d(
                 "WaxdPosLib",
                 "FingerprintReader[$readerNo]::SaveImage -> Saved image to $filePath"
             )
             true
         } catch (e: java.lang.Exception) {
+            listener.onFailure(e)
             Log.e(
                 "WaxdPosLib",
                 "FingerprintReader[" + readerNo + "]::SaveImage -> Exception: " + e.message

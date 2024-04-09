@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="header">18sp</dimen>
+    <dimen name="header_small">16sp</dimen>
+    <dimen name="title">14sp</dimen>
+    <dimen name="content">13sp</dimen>
+    <dimen name="body">12sp</dimen>
+    <dimen name="body_small">11sp</dimen>
+    <dimen name="small">10sp</dimen>
+    <dimen name="margin">10dp</dimen>
+    <dimen name="padding">10dp</dimen>
+</resources>
