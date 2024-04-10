@@ -20,6 +20,7 @@ import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
 import com.scanner.utils.readers.FingerprintHelper
 import com.github.legend295.fingerprintscanner.R
+import com.nextbiometrics.biometrics.NBBiometricsTemplate
 import com.scanner.utils.constants.Constant.FINGER_PRINT_READ_INFO
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.helper.OnFileSavedListener
@@ -34,7 +35,7 @@ class ScannerActivity : AppCompatActivity(),
 
     private var tvStatus: AppCompatTextView? = null
     private val list: ArrayList<File> = ArrayList()
-    private val listOfTemplate = ArrayList<NBBiometricsExtractResult>()
+    private val listOfTemplate = ArrayList<NBBiometricsTemplate>()
     private val fingerprintHelper by lazy {
         FingerprintHelper(
             this,
@@ -79,18 +80,24 @@ class ScannerActivity : AppCompatActivity(),
 
             ReaderStatus.SESSION_CLOSED, ReaderStatus.INIT_FAILED -> {
                 //first call cancel tap function of readers and then re-initialize the readers
-                setMessage("Retrying...")
+//                setMessage("Retrying...")
+                runOnUiThread {
+                    dialog?.first?.show()
+                }
                 list.clear()
                 fingerprintHelper.cancelTap()
                 fingerprintHelper.init()
+
             }
 
             ReaderStatus.NONE -> {}
             ReaderStatus.FINGERS_RELEASED -> {
+//                setMessage("Reading fingers again.")
 //                fingerprintHelper.waitFingerRead(difFingerprintReadInfo)
             }
 
             ReaderStatus.FINGERS_READ_SUCCESS -> {
+//                setMessage("Reading fingers again.")
 //                fingerprintHelper.waitFingerRead(difFingerprintReadInfo)
             }
 
@@ -112,7 +119,7 @@ class ScannerActivity : AppCompatActivity(),
         when (readerStatus) {
             ReaderStatus.NONE -> {
                 //Initial value of the readers and readers are not initialized in this phase
-                setMessage(getString(R.string.initializing))
+//                setMessage(getString(R.string.initializing))
                 runOnUiThread {
                     dialog?.first?.show()
                 }
@@ -125,14 +132,17 @@ class ScannerActivity : AppCompatActivity(),
                     dialog?.second?.text = "Initialized"
                     dialog?.first?.dismiss()
                 }
-                    if (fingerprintHelper.start()) {
-                        Log.d(tag, "START OK")
-                    } else {
-                        Log.d(tag, "START FAILED")
-                    }
+                if (fingerprintHelper.start()) {
+                    Log.d(tag, "START OK")
+                } else {
+                    Log.d(tag, "START FAILED")
+                }
             }
 
             ReaderStatus.INIT_FAILED -> {
+                runOnUiThread {
+                    dialog?.first?.dismiss()
+                }
                 setMessage(getString(R.string.initializing_failed))
             }
 

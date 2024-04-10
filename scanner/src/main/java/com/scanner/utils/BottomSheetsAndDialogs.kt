@@ -14,7 +14,7 @@ fun Context.readersInitializationDialog(): Pair<Dialog, AppCompatTextView> {
     val tvStatus = layout.findViewById<AppCompatTextView>(R.id.tvStatus)
     with(layout) {
         setOnClickListener {
-            dialog.dismiss()
+//            dialog.dismiss()
         }
     }
 

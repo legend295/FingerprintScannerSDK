@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.common.apiutil.powercontrol.PowerControl
 import com.nextbiometrics.biometrics.NBBiometricsExtractResult
+import com.nextbiometrics.biometrics.NBBiometricsTemplate
 import com.nextbiometrics.devices.NBDevices
 import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
@@ -13,7 +14,7 @@ import org.json.JSONObject
 internal class FingerprintHelper(
     private val context: Context,
     private var sessionHelper: ReaderSessionHelper,
-    private val listOfTemplate: ArrayList<NBBiometricsExtractResult>,
+    private val listOfTemplate: ArrayList<NBBiometricsTemplate>,
     private val listener: OnFileSavedListener
 ) {
 
