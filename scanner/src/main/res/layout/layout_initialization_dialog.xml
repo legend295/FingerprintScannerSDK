@@ -13,7 +13,7 @@
             android:id="@+id/tvTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Fingerprint Initialization"
+            android:text="@string/initialising_fingerprints"
             android:textColor="@color/black"
             android:textSize="@dimen/header"
             android:textStyle="bold"
@@ -21,24 +21,35 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <androidx.appcompat.widget.AppCompatImageView
-            android:id="@+id/ivFingerprint"
-            android:layout_width="100dp"
-            android:layout_height="100dp"
-            android:layout_marginTop="@dimen/margin"
-            android:src="@drawable/ic_fingerprint_scan"
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/tvMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_margin="@dimen/margin"
+            android:gravity="center"
+            android:text="@string/please_wait_for_to_initialise_the_nfingerprints_session"
+            android:textColor="@color/black"
+            android:textSize="15sp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/tvTitle" />
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/tvStatus"
+        <androidx.appcompat.widget.AppCompatImageView
+            android:id="@+id/ivFingerprint"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/margin"
+            android:src="@drawable/ic_android_fingerprint_infra_red"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tvMessage" />
+
+        <ProgressBar
+            android:id="@+id/tvStatus"
+            android:layout_width="30dp"
+            android:layout_height="50dp"
             android:text="@string/initializing"
-            android:textColor="@color/black"
-            android:textSize="@dimen/header_small"
+            android:indeterminateTint="#818181"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/ivFingerprint" />

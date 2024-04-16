@@ -59,6 +59,7 @@ afterEvaluate {
     }
 }
 
+
 //test
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])
@@ -70,8 +71,21 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
-    implementation 'com.github.dcendents:android-maven-gradle-plugin:2.1'
+//    implementation 'com.github.dcendents:android-maven-gradle-plugin:2.1'
+//    implementation 'org.sonatype.central:central-publishing-maven-plugin:0.4.0'
 //    implementation 'com.vanniktech.maven.publish:com.vanniktech.maven.publish.gradle.plugin:0.28.0'
 }
+/*task generateRepo(type:Zip){
+    def publishTask = tasks.named('publishReleasePublicationToMyrepoRepository')
+    from publishTask.map { it.getRepository().getUrl() }
+    into 'mylibrary'
+    archiveFileName.set('mylibrary.zip')
+}*/
+/*tasks.register('generateRepo', Zip) {
+    def publishTask = tasks.named('publishReleasePublicationToMyrepoRepository')
+    from publishTask.map { it.getRepository().getUrl() }
+    into 'mylibrary'
+    archiveFileName.set('mylibrary.zip')
+}*/
 
 //apply from: '../publish-package.gradle'

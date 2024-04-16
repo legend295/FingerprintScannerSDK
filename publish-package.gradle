@@ -48,7 +48,7 @@ afterEvaluate {
 //                artifact javaSourcesJar
 
                 groupId 'io.github.legend295'
-                version '1.0.0-SNAPSHOT'
+                version '1.0.4'
                 pom {
                     name = artifactId
                     description = POM_DESCRIPTION

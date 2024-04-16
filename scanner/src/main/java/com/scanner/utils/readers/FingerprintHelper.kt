@@ -41,7 +41,7 @@ internal class FingerprintHelper(
     private val defaultSavePath = "/storage/emulated/0/DCIM/fpd/"
 
     init {
-        sessionHelper.onSessionChanges(readerStatus)
+        sessionHelper.onSessionChanges(readerStatus, "")
     }
 
     fun init(): Boolean {
@@ -56,8 +56,13 @@ internal class FingerprintHelper(
             PowerControl(context).usbPower(1)
             Thread.sleep(1000)
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize...")
+            Log.d(
+                "WaxdPosLib",
+                "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
+            )
             //NBDevices.initialize(context.getApplicationContext());
-            NBDevices.initialize(context)
+            if (!NBDevices.isInitialized())
+                NBDevices.initialize(context)
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize... Done")
             terminate = true
             Log.d("WaxdPosLib", "FingerPrintService::Init -> Waiting for USB devices ...")
@@ -82,7 +87,7 @@ internal class FingerprintHelper(
                 Log.d("WaxdPosLib", "FingerPrintService::Init -> No fingerprint reader found")
                 readerInfo = "No fingerprint reader"
                 readerStatus = ReaderStatus.INIT_FAILED
-                sessionHelper.onSessionChanges(readerStatus)
+                sessionHelper.onSessionChanges(readerStatus, err)
                 return false
             }
             numReaders = 0
@@ -116,7 +121,7 @@ internal class FingerprintHelper(
                     "FingerPrintService::Init -> Not all readers initialized ($numReaders)"
                 )
                 readerStatus = ReaderStatus.INIT_FAILED
-                sessionHelper.onSessionChanges(readerStatus)
+                sessionHelper.onSessionChanges(readerStatus, err)
                 return false
             }
             Log.d("WaxdPosLib", "FingerPrintService::Init -> OK")
@@ -124,21 +129,21 @@ internal class FingerprintHelper(
 //            handler.sendMessage("SERVICE BOUND", readerInfo)
             init = true
             readerStatus = ReaderStatus.SERVICE_BOUND
-            sessionHelper.onSessionChanges(readerStatus)
+            sessionHelper.onSessionChanges(readerStatus, readerInfo)
             true
         } catch (e: Exception) {
             readerStatus = ReaderStatus.INIT_FAILED
-            sessionHelper.onSessionChanges(readerStatus)
+            sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
             false
         } catch (e: ExceptionInInitializerError) {
             readerStatus = ReaderStatus.INIT_FAILED
-            sessionHelper.onSessionChanges(readerStatus)
+            sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
             false
         } catch (e: NoClassDefFoundError) {
             readerStatus = ReaderStatus.INIT_FAILED
-            sessionHelper.onSessionChanges(readerStatus)
+            sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
             false
         }
@@ -163,7 +168,7 @@ internal class FingerprintHelper(
                     init = false
 //                    handler.sendMessage("INIT FAILED")
                     readerStatus = ReaderStatus.INIT_FAILED
-                    sessionHelper.onSessionChanges(readerStatus)
+                    sessionHelper.onSessionChanges(readerStatus, "Init FAILED")
                 }
             }.start()
 
@@ -248,7 +253,7 @@ internal class FingerprintHelper(
                             "${reader[0]!!.getDetectLevel()},${reader[1]!!.getDetectLevel()}"
 //                        handler.sendMessage("FINGERS DETECTED", data)
                         readerStatus = ReaderStatus.FINGERS_DETECTED
-                        sessionHelper.onSessionChanges(readerStatus)
+                        sessionHelper.onSessionChanges(readerStatus, data)
                         Log.d(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> Fingers Detected -> Reading ..."
@@ -261,17 +266,17 @@ internal class FingerprintHelper(
                         )
 //                        handler.sendMessage("TAP CANCELLED")
                         readerStatus = ReaderStatus.TAP_CANCELLED
-                        sessionHelper.onSessionChanges(readerStatus)
+                        sessionHelper.onSessionChanges(readerStatus, "")
                     }
                 } else {
-                    if (!reader[0]!!.isSessionOpen()) {
+                    if (reader[0]?.isSessionOpen() != true) {
                         Log.d(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> Fingers Detection FAILED -> SESSION CLOSED"
                         )
 //                        handler.sendMessage("SESSION CLOSED")
                         readerStatus = ReaderStatus.SESSION_CLOSED
-                        sessionHelper.onSessionChanges(readerStatus)
+                        sessionHelper.onSessionChanges(readerStatus, "")
                         started = false
                         init = false
                     } else if (!cancelled) {
@@ -284,7 +289,7 @@ internal class FingerprintHelper(
                             "${reader[0]!!.getDetectLevel()},${reader[1]!!.getDetectLevel()}"
 //                        handler.sendMessage("FINGERS READ FAILED", data)
                         readerStatus = ReaderStatus.FINGERS_READ_FAILED
-                        sessionHelper.onSessionChanges(readerStatus)
+                        sessionHelper.onSessionChanges(readerStatus, data)
                     } else {
                         Log.d(
                             "WaxdPosLib",
@@ -292,7 +297,7 @@ internal class FingerprintHelper(
                         )
 //                        handler.sendMessage("TAP CANCELLED")
                         readerStatus = ReaderStatus.TAP_CANCELLED
-                        sessionHelper.onSessionChanges(readerStatus)
+                        sessionHelper.onSessionChanges(readerStatus, "")
                     }
                 }
                 Log.d("WaxdPosLib", "FingerprintService::WaitFingerTap -> Done")
@@ -313,7 +318,7 @@ internal class FingerprintHelper(
         savePath = path
     }
 
-    private fun close() {
+    fun close() {
         Log.d("WaxdPosLib", "FingerPrintService::Close...")
         try {
             for (i in 0 until numReaders) {
@@ -325,6 +330,7 @@ internal class FingerprintHelper(
             if (terminate) {
                 NBDevices.terminate()
             }
+//            enableLowPowerMode()
             PowerControl(context).usbPower(0)
         } catch (e: java.lang.Exception) {
             Log.e("WaxdPosLib", "FingerprintService::Close -> Exception: " + e.message)
@@ -438,7 +444,7 @@ internal class FingerprintHelper(
                 )
 //                handler.sendMessage("FINGERS READ FAILED", err)
                 readerStatus = ReaderStatus.FINGERS_READ_FAILED
-                sessionHelper.onSessionChanges(readerStatus)
+                sessionHelper.onSessionChanges(readerStatus, err)
                 return
             }
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> waiting for taps")
@@ -461,12 +467,12 @@ internal class FingerprintHelper(
                 )
 //                handler.sendMessage("FINGERS READ FAILED", err)
                 readerStatus = ReaderStatus.FINGERS_READ_FAILED
-                sessionHelper.onSessionChanges(readerStatus)
+                sessionHelper.onSessionChanges(readerStatus, err)
             } else {
                 val data: String = "${reader[0]!!.getQuality()},${reader[1]!!.getQuality()}"
 //                handler.sendMessage("FINGERS READ SUCCESS", data)
                 readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
-                sessionHelper.onSessionChanges(readerStatus)
+                sessionHelper.onSessionChanges(readerStatus, data)
             }
             released = false
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> Done")
@@ -484,11 +490,12 @@ internal class FingerprintHelper(
             val s = System.currentTimeMillis()
             while (run) {
                 if (reader[0]?.detectFinger(level) != true && reader[1]?.detectFinger(level) != true) {
+                    val data = "${reader[0]!!.getQuality()},${reader[1]!!.getQuality()}"
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersRelease -> Finger Released")
                     run = false
 //                    handler.sendMessage("FINGERS RELEASED")
                     readerStatus = ReaderStatus.FINGERS_RELEASED
-                    sessionHelper.onSessionChanges(readerStatus)
+                    sessionHelper.onSessionChanges(readerStatus, data)
                     return true
                 }
                 if (timeout > 0 && System.currentTimeMillis() - s > timeout * 1000) {
