@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
+import android.widget.Button
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.databinding.DataBindingUtil
@@ -16,7 +17,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val tvStartScan: AppCompatTextView = findViewById(R.id.tvStartScan)
+        val tvStartScan: Button = findViewById(R.id.tvStartScan)
         tvStartScan.setOnClickListener {
             scanningLauncher.launch(Intent(this, ScannerActivity()::class.java))
         }
