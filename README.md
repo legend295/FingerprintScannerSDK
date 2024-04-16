@@ -1,6 +1,6 @@
 # Fingerprint Scanner Library
 
-[![Releases](https://jitpack.io/v/legend295/FingerprintScannerSDK.svg)](https://jitpack.io/#legend295/FingerprintScannerSDK)
+[![Release](https://jitpack.io/v/legend295/FingerprintScannerSDK.svg)](https://jitpack.io/#legend295/FingerprintScannerSDK)
 
 A GitHub repo demonstrating seamless integration of fingerprint scanning into Android apps.
 
@@ -24,7 +24,7 @@ dependencies {
 }
 ```
 
-![](https://jitpack.io/v/legend295/FingerprintScannerSDK.svg)
+![Release](https://jitpack.io/v/legend295/FingerprintScannerSDK.svg)
 
 Add the above line to your project's `build.gradle` file and `settings.gradle` file to include FingerprintScannerLib in your Android project.
 
