@@ -1,6 +1,6 @@
 # Fingerprint Scanner Library
 
-[![](https://jitpack.io/v/legend295/FingerprintScannerSDK.svg)](https://jitpack.io/#legend295/FingerprintScannerSDK)
+[![Releases](https://jitpack.io/v/legend295/FingerprintScannerSDK.svg)](https://jitpack.io/#legend295/FingerprintScannerSDK)
 
 A GitHub repo demonstrating seamless integration of fingerprint scanning into Android apps.
 
