@@ -21,6 +21,8 @@ class MainActivity : AppCompatActivity() {
         tvStartScan.setOnClickListener {
             scanningLauncher.launch(Intent(this, ScannerActivity()::class.java))
         }
+
+
     }
 
     private val scanningLauncher =

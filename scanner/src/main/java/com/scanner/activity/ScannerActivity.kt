@@ -267,6 +267,8 @@ class ScannerActivity : AppCompatActivity(),
 
             ReaderStatus.FINGERS_RELEASED -> {
                 data?.setFingerQuality()
+
+                fingerprintHelper.identifyFingers()
             }
 
             ReaderStatus.FINGERS_READ_SUCCESS -> {
@@ -412,8 +414,8 @@ class ScannerActivity : AppCompatActivity(),
     override fun onStop() {
         super.onStop()
         fingerprintHelper.stop()
-        setResult(RESULT_CANCELED)
-        finish()
+//        setResult(RESULT_CANCELED)
+//        finish()
     }
 
     /**

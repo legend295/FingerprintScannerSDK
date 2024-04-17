@@ -330,7 +330,7 @@ internal class FingerprintHelper(
             if (terminate) {
                 NBDevices.terminate()
             }
-//            enableLowPowerMode()
+
             PowerControl(context).usbPower(0)
         } catch (e: java.lang.Exception) {
             Log.e("WaxdPosLib", "FingerprintService::Close -> Exception: " + e.message)
@@ -518,6 +518,15 @@ internal class FingerprintHelper(
         } catch (e: java.lang.Exception) {
             Log.e("WaxdPosLib", "FingerPrintService::WaitFingerRelease -> Exception: " + e.message)
             false
+        }
+    }
+
+    fun identifyFingers() {
+        reader[0]?.identifyFingers {
+
+        }
+        reader[1]?.identifyFingers {
+
         }
     }
 }
