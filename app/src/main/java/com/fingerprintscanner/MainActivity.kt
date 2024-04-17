@@ -12,12 +12,15 @@ import com.scanner.activity.ScannerActivity
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.serializable
 import java.io.File
+import java.lang.StringBuilder
 
 class MainActivity : AppCompatActivity() {
+    private var tvStatus: AppCompatTextView? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val tvStartScan: Button = findViewById(R.id.tvStartScan)
+        val tvStartScan: Button = findViewById(R.id.btnStartScan)
+        tvStatus = findViewById(R.id.tvStatus)
         tvStartScan.setOnClickListener {
             scanningLauncher.launch(Intent(this, ScannerActivity()::class.java))
         }
@@ -28,6 +31,17 @@ class MainActivity : AppCompatActivity() {
             if (it.resultCode == RESULT_OK) {
                 val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
                 Log.d(MainActivity::class.simpleName, list?.size.toString())
+                handleResponse(list)
             }
         }
+
+    private fun handleResponse(list: ArrayList<File>?) {
+        var message = ""
+        list?.forEach {
+            message += "\n${it.path}"
+        }
+        if (message.isNotEmpty()) {
+            tvStatus?.text = StringBuilder().append("File saved to paths :- ").append(message)
+        }
+    }
 }
