@@ -7,10 +7,8 @@ import android.util.Log
 import android.widget.Button
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatTextView
-import androidx.databinding.DataBindingUtil
 import com.scanner.activity.ScannerActivity
 import com.scanner.utils.constants.ScannerConstants
-import com.scanner.utils.serializable
 import java.io.File
 import java.lang.StringBuilder
 
