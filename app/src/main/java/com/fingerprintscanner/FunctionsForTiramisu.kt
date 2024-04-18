@@ -1,4 +1,4 @@
-package com.scanner.utils
+package com.fingerprintscanner
 
 import android.content.Intent
 import android.os.Build
