@@ -8,7 +8,7 @@ import androidx.appcompat.widget.AppCompatTextView
 import com.github.legend295.fingerprintscanner.R
 import com.github.legend295.fingerprintscanner.databinding.LayoutInitializationDialogBinding
 
-fun Context.readersInitializationDialog(): Dialog {
+internal fun Context.readersInitializationDialog(): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
 //    val tvStatus = layout.findViewById<AppCompatTextView>(R.id.tvStatus)
@@ -24,7 +24,7 @@ fun Context.readersInitializationDialog(): Dialog {
     return dialog
 }
 
-fun Context.verificationDialog(): Dialog {
+internal fun Context.verificationDialog(): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
 //    val tvStatus = layout.findViewById<AppCompatTextView>(R.id.tvStatus)

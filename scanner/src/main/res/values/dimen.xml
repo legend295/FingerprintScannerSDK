@@ -9,4 +9,6 @@
     <dimen name="small">10sp</dimen>
     <dimen name="margin">10dp</dimen>
     <dimen name="padding">10dp</dimen>
+    <dimen name="elevation">5dp</dimen>
+    <dimen name="textsize">9sp</dimen>
 </resources>

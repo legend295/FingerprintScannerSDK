@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="image_format_list">
+        <item>BMP</item>
+        <item>RAW</item>
+        <item>PNG</item>
+        <item>JPG</item>
+    </string-array>
+</resources>

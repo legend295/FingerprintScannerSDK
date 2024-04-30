@@ -13,4 +13,17 @@
     <string name="please_wait_for_to_initialise_the_nfingerprints_session">Please wait for to initialise the\nfingerprints session</string>
     <string name="start_scanning">Start Scanning</string>
     <string name="cancel">Cancel</string>
+
+    <string name="hello">NEXT Biometrics SDK</string>
+    <string name="spoofsetting">Spoof Setting</string>
+    <string name="autosavesetting">Autosave Setting</string>
+    <string name="refreshsetting">Refresh Setting</string>
+
+    <string name="scan_and_extract">Scan and Extract</string>
+    <string name="low_power_mode">Low Power mode</string>
+    <string name="firmware_upgrade">Firmware Upgrade</string>
+    <string name="current_version">Current Version</string>
+    <string name="available_version">Available Version</string>
+    <string name="completed">Completed</string>
+    <string name="firmware_upgrade_progress">Firmware Upgrade In-Progress Do not Back press or close the application</string>
 </resources>

@@ -1,13 +1,19 @@
 package com.scanner.utils.readers
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.util.Log
 import com.common.apiutil.powercontrol.PowerControl
-import com.nextbiometrics.biometrics.NBBiometricsExtractResult
+import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
+import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
+import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDevices
 import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
+import com.scanner.utils.enums.PreviewListenerType
+import com.scanner.utils.enums.ScanningType
+import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
 import org.json.JSONObject
 
@@ -15,8 +21,10 @@ internal class FingerprintHelper(
     private val context: Context,
     private var sessionHelper: ReaderSessionHelper,
     private val listOfTemplate: ArrayList<NBBiometricsTemplate>,
-    private val listener: OnFileSavedListener
-) {
+    private val listener: OnFileSavedListener,
+    private val fingerprintListener: FingerprintListener,
+
+    ) {
 
     private var reader = arrayOf<FingerprintReader?>(null, null)
     private var numReaders = 0
@@ -37,14 +45,17 @@ internal class FingerprintHelper(
     private val defaultLevel = 100
     private var compression = 1.0
     private val defaultCompression = 1.0
-    private var savePath: String? = null
     private val defaultSavePath = "/storage/emulated/0/DCIM/fpd/"
+    private var savePath: String? = defaultSavePath
+    private var scanningType: ScanningType? = null
+    private var bvnNumber: String? = null
 
     init {
         sessionHelper.onSessionChanges(readerStatus, "")
     }
 
     fun init(): Boolean {
+        if (scanningType == null || bvnNumber == null) return false
         Log.d("WaxdPosLib", "FingerprintService::Init...")
         val info = JSONObject()
         init = false
@@ -92,7 +103,14 @@ internal class FingerprintHelper(
             }
             numReaders = 0
             for (i in 0..1) {
-                reader[i] = FingerprintReader(context, devices[i], i, listOfTemplate, listener)
+                reader[i] = FingerprintReader(
+                    context,
+                    devices[i],
+                    i,
+                    listOfTemplate,
+                    listener, scanningType!!, bvnNumber!!
+                )
+                reader[i]?.setListener(fingerListener)
                 if (reader[i]?.init() != true) {
                     Log.d(
                         "WaxdPosLib",
@@ -315,7 +333,8 @@ internal class FingerprintHelper(
     }
 
     fun setSavePath(path: String) {
-        savePath = path
+        if (path.isNotEmpty())
+            savePath = path
     }
 
     fun close() {
@@ -437,6 +456,9 @@ internal class FingerprintHelper(
             if (!reader[0]!!.readFinger(level, compression, path!!) || !reader[1]!!
                     .readFinger(level, compression, path)
             ) {
+                /*if (!reader[0]!!.scanAndExtracts(compression, path!!) || !reader[1]!!
+                        .scanAndExtracts(compression, path)
+                ) {*/
                 err = "FINGERS READ FAILED"
                 Log.d(
                     "WaxdPosLib",
@@ -446,6 +468,7 @@ internal class FingerprintHelper(
                 readerStatus = ReaderStatus.FINGERS_READ_FAILED
                 sessionHelper.onSessionChanges(readerStatus, err)
                 return
+
             }
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> waiting for taps")
             try {
@@ -521,6 +544,16 @@ internal class FingerprintHelper(
         }
     }
 
+
+    fun scanAndExtract() {
+        if (reader[0]?.scanAndExtract(defaultSavePath) != true ||
+            reader[1]?.scanAndExtract(defaultSavePath) != true
+        ) {
+            readerStatus = ReaderStatus.FINGERS_READ_FAILED
+            sessionHelper.onSessionChanges(readerStatus, err)
+        }
+    }
+
     fun identifyFingers() {
         reader[0]?.identifyFingers {
 
@@ -528,5 +561,70 @@ internal class FingerprintHelper(
         reader[1]?.identifyFingers {
 
         }
+    }
+
+    val imageArray = HashMap<Int, ByteArray?>()
+    val scanStatus = HashMap<Int, NBDeviceScanStatus?>()
+    val extractStatus = HashMap<Int, NBBiometricsStatus?>()
+    val extractionCompleteStatus = HashMap<Int, Boolean>()
+
+    private val fingerListener = object : FingerprintListener {
+        override fun showResult(
+            image: ByteArray?,
+            text: String?,
+            bitmap: Bitmap,
+            readerNo: Int,
+            quality: Int
+        ) {
+            imageArray[readerNo] = image
+//            if (imageArray.size >= 2)
+            fingerprintListener.showResult(image, text, bitmap, readerNo, quality)
+        }
+
+        override fun updateMessage(message: String, readerNo: Int) {
+            fingerprintListener.updateMessage(message, readerNo)
+        }
+
+        override fun showMessage(message: String?, isErrorMessage: Boolean, readerNo: Int) {
+            fingerprintListener.showMessage(message, isErrorMessage, readerNo)
+        }
+
+        override fun onScanExtractCompleted(readerNo: Int) {
+            extractionCompleteStatus[readerNo] = true
+            if (extractionCompleteStatus.size >= 2)
+                fingerprintListener.onScanExtractCompleted(readerNo)
+        }
+
+        override fun onReaderStatusChange(
+            status: NBDeviceScanStatus?,
+            readerNo: Int,
+            previewListenerType: PreviewListenerType
+        ) {
+            scanStatus[readerNo] = status
+//            if (scanStatus.size >= 2)
+            fingerprintListener.onReaderStatusChange(status, readerNo, previewListenerType)
+        }
+
+        override fun extractionResult(status: NBBiometricsStatus?, readerNo: Int) {
+            extractStatus[readerNo] = status
+//            if (extractStatus.size >= 2)
+            fingerprintListener.extractionResult(status, readerNo)
+        }
+
+        override fun identificationStatus(status: NBBiometricsStatus?, readerNo: Int) {
+            fingerprintListener.identificationStatus(status, readerNo)
+        }
+
+        override fun identificationResult(result: NBBiometricsIdentifyResult?, readerNo: Int) {
+            fingerprintListener.identificationResult(result, readerNo)
+        }
+    }
+
+    fun setBvnNumber(number: String) {
+        bvnNumber = number
+    }
+
+    fun setScanningType(scanningType: ScanningType) {
+        this.scanningType = scanningType
     }
 }

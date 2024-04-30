@@ -7,37 +7,55 @@ import android.util.Log
 import android.widget.Button
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatTextView
-import com.scanner.activity.ScannerActivity
+import com.scanner.activity.FingerprintScanner
 import com.scanner.utils.constants.ScannerConstants
+import com.scanner.utils.enums.ScanningType
 import java.io.File
 import java.lang.StringBuilder
 
 class MainActivity : AppCompatActivity() {
     private var tvStatus: AppCompatTextView? = null
+    private val bvnNumber =
+        "coopvest823n283n23"// only for testing can be replaced with user's original bvn number
+    private val phoneNumber =
+        "12345678900"// only for testing can be replaced with user's original phone number
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        val tvStartScan: Button = findViewById(R.id.btnStartScan)
+        val tvRegistration: Button = findViewById(R.id.btnRegistration)
+        val tvVerification: Button = findViewById(R.id.btnVerification)
         tvStatus = findViewById(R.id.tvStatus)
-        tvStartScan.setOnClickListener {
-            scanningLauncher.launch(Intent(this, ScannerActivity()::class.java))
+        tvRegistration.setOnClickListener {
+            FingerprintScanner.Builder().setBvnNumber(bvnNumber).setPhoneNumber(phoneNumber)
+                .setScanningType(ScanningType.REGISTRATION).start(this, scanningLauncher)
         }
 
-
+        tvVerification.setOnClickListener {
+            FingerprintScanner.Builder().setBvnNumber(bvnNumber).setPhoneNumber(phoneNumber)
+                .setScanningType(ScanningType.VERIFICATION).start(this, scanningLauncher)
+        }
     }
 
     private val scanningLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (it.resultCode == RESULT_OK) {
                 val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
+                val isVerified: Boolean? =
+                    it.data?.getBooleanExtra(ScannerConstants.VERIFICATION_RESULT, false)
                 Log.d(MainActivity::class.simpleName, list?.size.toString())
-                handleResponse(list)
+                handleResponse(list, isVerified)
             }
         }
 
-    private fun handleResponse(list: ArrayList<File>?) {
+    private fun handleResponse(list: ArrayList<File>?, isVerified: Boolean?) {
+        if (list.isNullOrEmpty()) {
+            tvStatus?.text =
+                StringBuilder().append("Fingerprint verification :- ").append(isVerified)
+            return
+        }
         var message = ""
-        list?.forEach {
+        list.forEach {
             message += "\n${it.path}"
         }
         if (message.isNotEmpty()) {

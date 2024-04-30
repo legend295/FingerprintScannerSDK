@@ -17,26 +17,39 @@
         app:layout_constraintTop_toTopOf="parent" />
 
     <Button
-        android:id="@+id/btnStartScan"
+        android:id="@+id/btnRegistration"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/start_scan"
+        android:text="@string/add_user"
         android:textSize="20sp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias=".7" />
+
+    <Button
+        android:id="@+id/btnVerification"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="15sp"
+        android:text="@string/verification"
+        android:textSize="20sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btnRegistration"
+        app:layout_constraintVertical_bias=".8" />
 
     <androidx.appcompat.widget.AppCompatTextView
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin"
-        tools:text="@string/app_name"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/btnStartScan"
-        app:layout_constraintVertical_bias="1" />
+        app:layout_constraintTop_toBottomOf="@id/btnRegistration"
+        app:layout_constraintVertical_bias="1"
+        tools:text="@string/app_name" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

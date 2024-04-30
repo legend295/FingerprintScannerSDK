@@ -5,37 +5,54 @@ import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.scanner.utils.helper.ReaderSessionHelper
-import com.scanner.utils.ReaderStatus
-import com.scanner.utils.readers.FingerprintHelper
 import com.github.legend295.fingerprintscanner.R
+import com.google.gson.Gson
+import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
+import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
+import com.nextbiometrics.devices.NBDeviceScanStatus
+import com.scanner.utils.BuilderOptions
+import com.scanner.utils.ReaderStatus
+import com.scanner.utils.constants.Constant
 import com.scanner.utils.constants.Constant.FINGER_PRINT_READ_INFO
 import com.scanner.utils.constants.ScannerConstants
+import com.scanner.utils.enums.PreviewListenerType
+import com.scanner.utils.enums.ScanningType
+import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
+import com.scanner.utils.helper.ReaderSessionHelper
+import com.scanner.utils.readers.FingerprintHelper
 import com.scanner.utils.readersInitializationDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Timer
+import java.util.TimerTask
 
-class ScannerActivity : AppCompatActivity(),
+internal class ScannerActivity :
+    AppCompatActivity(),
     ReaderSessionHelper {
+
 
     private var tvStatus: AppCompatTextView? = null
     private var tvLeftQuality: AppCompatTextView? = null
@@ -44,9 +61,12 @@ class ScannerActivity : AppCompatActivity(),
     private var btnCancel: AppCompatButton? = null
     private var ivScannerLeft: AppCompatImageView? = null
     private var ivScannerRight: AppCompatImageView? = null
+    private var messagesHolder: LinearLayout? = null
+    private var scrollView: ScrollView? = null
 
     private var leftQuality: String? = null
     private var rightQuality: String? = null
+    private var scanningOptions: BuilderOptions? = null
 
     private val list: ArrayList<File> =
         ArrayList() // this will store the response of the saved files
@@ -56,16 +76,28 @@ class ScannerActivity : AppCompatActivity(),
             this,
             this,
             listOfTemplate,
-            onFileSavedListener
+            onFileSavedListener,
+            fingerprintListener
         )
     }
     private var readerStatus: ReaderStatus = ReaderStatus.NONE
     private val tag = ScannerActivity::class.java.simpleName
     private val difFingerprintReadInfo = FINGER_PRINT_READ_INFO
     private var dialog: Dialog? = null
+
+    //for display message
+    var lastMessage: TextView? = null
+
+    //    var textResults: TextView? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scanner)
+
+        val bundle = intent.extras
+        val options = bundle?.getString(Constant.SCANNING_OPTIONS)
+        scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
+        scanningOptions?.bvnNumber?.let { fingerprintHelper.setBvnNumber(it) }
+        scanningOptions?.scanningType?.let { fingerprintHelper.setScanningType(it) }
 
         tvStatus = findViewById(R.id.tvStatus)
         btnStart = findViewById(R.id.btnStart)
@@ -74,6 +106,9 @@ class ScannerActivity : AppCompatActivity(),
         ivScannerRight = findViewById(R.id.ivScannerRight)
         tvLeftQuality = findViewById(R.id.tvLeftQuality)
         tvRightQuality = findViewById(R.id.tvRightQuality)
+        messagesHolder = findViewById(R.id.messagesHolder)
+        scrollView = findViewById(R.id.scrollView1)
+//        textResults = findViewById(R.id.textResults)
 
         // Initialize Fingerprint readers on background thread on main thread UI will stuck
         initialize()
@@ -159,10 +194,16 @@ class ScannerActivity : AppCompatActivity(),
         when (readerStatus) {
             // Handles the case when the service is bound to the application or a session with the reader is already open.
             ReaderStatus.SERVICE_BOUND, ReaderStatus.SESSION_OPEN -> {
-                setMessage("Please tap your both fingers on readers.") // Prompt the user to scan their fingerprints.
+                /* if (scanningOptions?.scanningType == ScanningType.REGISTRATION)
+                     setMessage("Please put your both fingers on sensor.") // Prompt the user to scan their fingerprints.
+                 else setMessage("Please put your both fingers on sensor for verification.")*/
+                setMessage("Please wait for sensor initialization")
                 handleCancelButtonsVisibility(isVisible = true) // Make the cancel buttons visible.
-                setStartButtonMessage("", isVisible = false) // Hide the start button by making its message empty and its visibility false.
-                fingerprintHelper.waitFingerRead(difFingerprintReadInfo) // Wait for the fingerprint read to complete.
+                setStartButtonMessage(
+                    "",
+                    isVisible = false
+                ) // Hide the start button by making its message empty and its visibility false.
+                fingerprintHelper.scanAndExtract()
             }
 
             // Handles cases when the session is closed or initializing the reader failed.
@@ -186,7 +227,8 @@ class ScannerActivity : AppCompatActivity(),
             ReaderStatus.FINGERS_READ_SUCCESS, ReaderStatus.FINGERS_RELEASED -> {
                 if (list.isEmpty()) { // Check if the data list is unexpectedly empty.
                     runOnUiThread {
-                        Toast.makeText(this, "No data found.", Toast.LENGTH_SHORT).show() // Inform the user no data was found.
+                        Toast.makeText(this, "No data found.", Toast.LENGTH_SHORT)
+                            .show() // Inform the user no data was found.
                     }
                     return
                 }
@@ -199,19 +241,41 @@ class ScannerActivity : AppCompatActivity(),
             ReaderStatus.FINGERS_READ_FAILED -> {
                 // Handle scanner read failures here.
             }
+
             ReaderStatus.FINGERS_DETECTED -> {
                 // Handle the case where fingers are detected but not yet read.
             }
+
             ReaderStatus.TAP_CANCELLED -> {
                 fingerprintHelper.stop() // Stop the fingerprint helper function when a tap is cancelled.
             }
 
             ReaderStatus.LOW_FINGERS_QUALITY -> {
-                setMessage("Please tap your both fingers on readers.") // Ask the user to retry scanning due to low fingerprint quality.
+                setMessage("Please put your both fingers on sensor.") // Ask the user to retry scanning due to low fingerprint quality.
                 handleCancelButtonsVisibility(isVisible = true) // Ensure cancel buttons are visible for a possible cancel action.
                 setStartButtonMessage("", isVisible = false) // Hide the start button.
                 resetImages() // Reset any fingerprint images or related visuals.
-                fingerprintHelper.waitFingerRead(difFingerprintReadInfo) // Wait again for a fingerprint read.
+                fingerprintHelper.scanAndExtract() // scan and extract again
+            }
+
+            ReaderStatus.FINGERS_VERIFICATION_SUCCESS -> {
+                val intent = Intent()
+                intent.putExtra(
+                    ScannerConstants.VERIFICATION_RESULT,
+                    true
+                ) // Add the verification data to the intent.
+                setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
+                finish() // Close the current activity.
+            }
+
+            ReaderStatus.FINGERS_VERIFICATION_FAILED -> {
+                val intent = Intent()
+                intent.putExtra(
+                    ScannerConstants.VERIFICATION_RESULT,
+                    false
+                ) // Add the verification data to the intent.
+                setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
+                finish() // Close the current activity.
             }
         }
     }
@@ -250,6 +314,7 @@ class ScannerActivity : AppCompatActivity(),
                     getDialog()?.dismiss()
                 }
                 if (fingerprintHelper.start()) {
+//                    fingerprintHelper.scanAndExtract()
                     Log.d(tag, "START OK")
                 } else {
                     Log.d(tag, "START FAILED")
@@ -266,9 +331,9 @@ class ScannerActivity : AppCompatActivity(),
             }
 
             ReaderStatus.FINGERS_RELEASED -> {
-                data?.setFingerQuality()
 
-                fingerprintHelper.identifyFingers()
+
+//                fingerprintHelper.identifyFingers()
             }
 
             ReaderStatus.FINGERS_READ_SUCCESS -> {
@@ -276,7 +341,9 @@ class ScannerActivity : AppCompatActivity(),
                 setStartButtonMessage("Done", true)
                 handleCancelButtonsVisibility(isVisible = false)
                 setMessage(getString(R.string.read_success))
-                fingerprintHelper.waitFingersRelease()
+//                data?.setFingerQuality()
+
+//                fingerprintHelper.waitFingersRelease()
 //                enableLowPowerMode()
                 /* if (list.size > 8) {
                      setMessage("Please check logcat for biometric verification result. Restart the app to scan again.")
@@ -306,6 +373,8 @@ class ScannerActivity : AppCompatActivity(),
 
             ReaderStatus.TAP_CANCELLED -> {}
             ReaderStatus.LOW_FINGERS_QUALITY -> {}
+            ReaderStatus.FINGERS_VERIFICATION_SUCCESS -> {}
+            ReaderStatus.FINGERS_VERIFICATION_FAILED -> {}
         }
     }
 
@@ -396,7 +465,7 @@ class ScannerActivity : AppCompatActivity(),
     private fun setStartButtonMessage(msg: String, isVisible: Boolean) {
         runOnUiThread {
             btnStart?.text = msg
-            btnStart?.visibility = if (isVisible) View.VISIBLE else View.GONE
+            btnStart?.visibility = if (isVisible) View.VISIBLE else View.INVISIBLE
         }
     }
 
@@ -404,12 +473,6 @@ class ScannerActivity : AppCompatActivity(),
     // But enabling this will cause issues while termination of NBDevices and this error cause issue while reinitializing the readers
     //
     private fun enableLowPowerMode() = fingerprintHelper.enableLowPowerMode()
-
-    override fun onDestroy() {
-        super.onDestroy()
-//        enableLowPowerMode()
-
-    }
 
     override fun onStop() {
         super.onStop()
@@ -603,6 +666,205 @@ class ScannerActivity : AppCompatActivity(),
                     R.drawable.ic_android_fingerprint_grey
                 )
             )
+        }
+    }
+
+    private val fingerprintListener = object : FingerprintListener {
+        override fun showResult(
+            image: ByteArray?,
+            text: String?,
+            bitmap: Bitmap,
+            readerNo: Int,
+            quality: Int
+        ) {
+            this@ScannerActivity.showResult(image, text, bitmap, readerNo, quality)
+        }
+
+        override fun updateMessage(message: String, readerNo: Int) {
+            this@ScannerActivity.updateMessage(message)
+        }
+
+        override fun showMessage(message: String?, isErrorMessage: Boolean, readerNo: Int) {
+            this@ScannerActivity.showMessage(message, isErrorMessage)
+        }
+
+        override fun onScanExtractCompleted(readerNo: Int) {
+            this@ScannerActivity.onScanExtractCompleted()
+        }
+
+        override fun onReaderStatusChange(
+            status: NBDeviceScanStatus?,
+            readerNo: Int,
+            previewListenerType: PreviewListenerType
+        ) {
+            status?.handle(previewListenerType)
+        }
+
+        override fun extractionResult(status: NBBiometricsStatus?, readerNo: Int) {
+            if (status == NBBiometricsStatus.BAD_QUALITY) {
+                list.clear()
+                readerStatus = ReaderStatus.LOW_FINGERS_QUALITY
+                setMessage("Scanned fingers quality is bad. Please scan again")
+                handleCancelButtonsVisibility(isVisible = false)
+                setStartButtonMessage("Scan again", isVisible = true)
+            }
+        }
+
+        override fun identificationStatus(status: NBBiometricsStatus?, readerNo: Int) {
+        }
+
+        override fun identificationResult(result: NBBiometricsIdentifyResult?, readerNo: Int) {
+            if (result?.status != NBBiometricsStatus.OK) {
+                if (result?.status == NBBiometricsStatus.MATCH_NOT_FOUND) {
+                    readerStatus = ReaderStatus.FINGERS_VERIFICATION_FAILED
+                    setMessage("Match not found.")
+
+                } else {
+                    setMessage("Fingerprint verification :- ${result?.status}")
+                }
+            } else {
+                readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
+                setMessage("Fingerprint verification success")
+            }
+        }
+    }
+
+    private fun NBDeviceScanStatus.handle(previewListenerType: PreviewListenerType) {
+        when (this) {
+            NBDeviceScanStatus.NONE -> {}
+            NBDeviceScanStatus.OK -> {}
+            NBDeviceScanStatus.CANCELED -> {}
+            NBDeviceScanStatus.TIMEOUT -> {}
+            NBDeviceScanStatus.NO_FINGER -> {}
+            NBDeviceScanStatus.NOT_REMOVED -> {}
+            NBDeviceScanStatus.BAD_QUALITY -> {}
+            NBDeviceScanStatus.BAD_SIZE -> {}
+            NBDeviceScanStatus.SPOOF -> {}
+            NBDeviceScanStatus.EMPTY -> {}
+            NBDeviceScanStatus.DONE -> {
+                if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+                    readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                    setStartButtonMessage("Done", true)
+                    handleCancelButtonsVisibility(isVisible = false)
+                    setMessage(getString(R.string.read_success))
+                } else {
+                    if (previewListenerType == PreviewListenerType.EXTRACTION) {
+                        readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                        setMessage("Finger read success. Verification in progress.")
+                    } else {
+                        readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
+                        setStartButtonMessage("Done", true)
+                        handleCancelButtonsVisibility(isVisible = false)
+                        setMessage(getString(R.string.read_success))
+                    }
+                }
+//                fingerprintHelper.waitFingersRelease()
+            }
+
+            NBDeviceScanStatus.LIFT_FINGER -> {
+                setMessage("Please lift fingers")
+            }
+
+            NBDeviceScanStatus.WAIT_FOR_SENSOR_INITIALIZATION -> {
+                setMessage("Please wait for sensor initialization")
+            }
+
+            NBDeviceScanStatus.PUT_FINGER_ON_SENSOR -> {
+                setMessage("Please put you finger on Sensor.")
+            }
+
+            NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR -> {
+                setMessage("Please keep finger on sensor")
+            }
+
+            NBDeviceScanStatus.WAIT_FOR_DATA_PROCESSING -> {
+                setMessage("Please wait, processing data...")
+            }
+
+            NBDeviceScanStatus.SPOOF_DETECTED -> {}
+        }
+    }
+
+    fun onScanExtractCompleted() {
+        runOnUiThread {
+            btnStart?.isEnabled = true
+        }
+    }
+
+    private fun showMessage(message: String?, isErrorMessage: Boolean) {
+        runOnUiThread {
+            if (message.equals("ERROR: Invalid operation", ignoreCase = true)) {
+                val msg = "Device is in low power mode.Touch the sensor to wakeup the device."
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            } else {
+                if (isErrorMessage) {
+                    message?.let { Log.e("MainActivity", it) }
+                } else {
+                    message?.let { Log.i("MainActivity", it) }
+                }
+
+                val singleMessage = TextView(applicationContext)
+                if (isErrorMessage) singleMessage.setTextColor(resources.getColor(R.color.error_message_color))
+                singleMessage.append(message)
+                messagesHolder?.addView(singleMessage)
+                lastMessage = singleMessage
+            }
+        }
+
+        // Scroll to the end. This must be done with a delay, after the last message is drawn
+        val timer = Timer()
+        timer.schedule(object : TimerTask() {
+            override fun run() {
+                runOnUiThread {
+//                    val scrollView = findViewById<ScrollView>(R.id.scrollView1)
+                    scrollView?.fullScroll(View.FOCUS_DOWN)
+                }
+            }
+        }, 100)
+    }
+
+    private fun updateMessage(message: String) {
+        runOnUiThread {
+            Log.i(
+                "MainActivity",
+                String.format("%d: %s", System.currentTimeMillis(), message)
+            )
+            if (lastMessage != null) {
+                lastMessage?.text = message
+            }
+        }
+    }
+
+    fun showResult(image: ByteArray?, text: String?, bitmap: Bitmap, readerNo: Int, quality: Int) {
+        runOnUiThread {
+            if (image != null) {
+                if (readerNo == 0) {
+                    ivScannerLeft?.setImageBitmap(bitmap)
+                } else ivScannerRight?.setImageBitmap(bitmap)
+            } else {
+                if (readerNo == 0) {
+                    ivScannerLeft?.setImageResource(R.drawable.ic_android_fingerprint_grey)
+                } else ivScannerRight?.setImageResource(R.drawable.ic_android_fingerprint_grey)
+            }
+            text?.let { Log.i("MainActivity", it) }
+            text?.let { Log.i("MainActivity", "quality[$readerNo] $quality") }
+            if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+                val leftQualityPercentage: Double
+                val rightQualityPercentage: Double
+                if (readerNo == 0) {
+                    leftQualityPercentage = (((5.0 - quality.toDouble()) / 4.0) * 100.0)
+                    this@ScannerActivity.leftQuality = "${leftQualityPercentage.toInt()}%"
+
+                } else {
+                    rightQualityPercentage = (((5.0 - quality.toDouble()) / 4.0) * 100.0)
+                    this@ScannerActivity.rightQuality = "${rightQualityPercentage.toInt()}%"
+                }
+                runOnUiThread {
+                    tvLeftQuality?.text = this@ScannerActivity.leftQuality
+                    tvRightQuality?.text = this@ScannerActivity.rightQuality
+                }
+            }
+//            checkQualityOfFingers(leftQualityPercentage.toInt(), rightQualityPercentage.toInt())
         }
     }
 
