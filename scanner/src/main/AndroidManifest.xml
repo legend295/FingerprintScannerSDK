@@ -5,10 +5,9 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
-    <application android:requestLegacyExternalStorage="true">
-        <activity
-            android:name="com.scanner.activity.MainActivity"
-            android:exported="false" />
+    <application
+        android:name="com.scanner.app.ScannerApp"
+        android:requestLegacyExternalStorage="true">
         <activity
             android:name="com.scanner.activity.ScannerActivity"
             android:exported="false" />

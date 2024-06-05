@@ -1,10 +1,13 @@
 package com.scanner.activity
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.fragment.app.Fragment
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.gson.Gson
 import com.scanner.utils.BuilderOptions
 import com.scanner.utils.constants.Constant.SCANNING_OPTIONS
@@ -12,11 +15,11 @@ import com.scanner.utils.enums.ScanningType
 
 class FingerprintScanner {
 
-    fun builder(): Builder {
-        return Builder()
-    }
+    /* fun builder(): Builder {
+         return Builder()
+     }*/
 
-    class Builder {
+    class Builder(val context: Context) {
         private val options: BuilderOptions = BuilderOptions()
 
         fun setScanningType(scanningType: ScanningType?): Builder {
@@ -35,12 +38,21 @@ class FingerprintScanner {
             return this
         }
 
+        /*  fun setFirebaseFireStore(firebaseFireStore: FirebaseFirestore): Builder {
+              options.firebaseFireStore = firebaseFireStore
+              return this
+          }*/
+
         fun start(
             activity: Activity,
             launcher: ActivityResultLauncher<Intent>
         ) {
-            validate()
-            launcher.launch(getIntent(activity))
+            try {
+                validate()
+                launcher.launch(getIntent(activity))
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+            }
         }
 
         fun start(fragment: Fragment, launcher: ActivityResultLauncher<Intent>) {
@@ -52,8 +64,11 @@ class FingerprintScanner {
             if (options.scanningType == null) throw NullPointerException("Scanning Type cannot be null")
             if (options.bvnNumber == null) throw NullPointerException("Bvn number cannot be null")
             require(options.bvnNumber!!.isNotEmpty()) { "Bvn number cannot be empty" }
-            if (options.phoneNumber == null) throw NullPointerException("Phone number cannot be null")
-            require(options.phoneNumber!!.isNotEmpty()) { "Phone number cannot be empty" }
+            if (options.scanningType == ScanningType.REGISTRATION) {
+                if (options.phoneNumber == null) throw NullPointerException("Phone number cannot be null")
+                require(options.phoneNumber!!.isNotEmpty()) { "Phone number cannot be empty" }
+            }
+//            if (options.firebaseFireStore == null) throw NullPointerException("Firebase FireStore cannot be null")
         }
 
         private fun getIntent(activity: Activity?): Intent {

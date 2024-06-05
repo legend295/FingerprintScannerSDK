@@ -7,6 +7,7 @@ import com.common.apiutil.powercontrol.PowerControl
 import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
+import com.nextbiometrics.devices.NBDevice
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDevices
 import com.scanner.utils.helper.ReaderSessionHelper
@@ -15,16 +16,14 @@ import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
 import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 internal class FingerprintHelper(
-    private val context: Context,
-    private var sessionHelper: ReaderSessionHelper,
-    private val listOfTemplate: ArrayList<NBBiometricsTemplate>,
-    private val listener: OnFileSavedListener,
-    private val fingerprintListener: FingerprintListener,
-
-    ) {
+    private val context: Context
+) {
 
     private var reader = arrayOf<FingerprintReader?>(null, null)
     private var numReaders = 0
@@ -49,9 +48,31 @@ internal class FingerprintHelper(
     private var savePath: String? = defaultSavePath
     private var scanningType: ScanningType? = null
     private var bvnNumber: String? = null
+    private lateinit var sessionHelper: ReaderSessionHelper
+    private lateinit var listOfTemplate: ArrayList<NBBiometricsTemplate>
+    private lateinit var listener: OnFileSavedListener
+    private lateinit var fingerprintListener: FingerprintListener
+    private lateinit var devices: Array<NBDevice>
 
     init {
-        sessionHelper.onSessionChanges(readerStatus, "")
+//        sessionHelper.onSessionChanges(readerStatus, "")
+    }
+
+    fun isInit() = init
+    fun setSessionHelper(sessionHelper: ReaderSessionHelper) {
+        this.sessionHelper = sessionHelper
+    }
+
+    fun setListOfTemplate(listOfTemplate: ArrayList<NBBiometricsTemplate>) {
+        this.listOfTemplate = listOfTemplate
+    }
+
+    fun setOnFileSaveListener(listener: OnFileSavedListener) {
+        this.listener = listener
+    }
+
+    fun setFingerprintListener(fingerprintListener: FingerprintListener) {
+        this.fingerprintListener = fingerprintListener
     }
 
     fun init(): Boolean {
@@ -91,7 +112,7 @@ internal class FingerprintHelper(
                 "WaxdPosLib",
                 "FingerPrintService::Init -> numDevicesFound = $numDevicesFound"
             )
-            val devices = NBDevices.getDevices()
+            devices = NBDevices.getDevices()
             Log.d("WaxdPosLib", "FingerPrintService::Init -> " + devices.size + " devices found")
             if (devices.isEmpty()) {
                 err = "No fingerprint reader found"
@@ -105,12 +126,14 @@ internal class FingerprintHelper(
             for (i in 0..1) {
                 reader[i] = FingerprintReader(
                     context,
-                    devices[i],
-                    i,
-                    listOfTemplate,
-                    listener, scanningType!!, bvnNumber!!
+                    i
                 )
+                reader[i]?.setReader(devices[i])
+                reader[i]?.setListOfTemplate(listOfTemplate)
+                reader[i]?.setOnFileSaveListener(listener)
                 reader[i]?.setListener(fingerListener)
+                reader[i]?.setScanningType(scanningType!!)
+                reader[i]?.setBvnNumber(bvnNumber!!)
                 if (reader[i]?.init() != true) {
                     Log.d(
                         "WaxdPosLib",
@@ -170,6 +193,14 @@ internal class FingerprintHelper(
     fun start(): Boolean {
         Log.d("WaxdPosLib", "FingerprintService::Start")
         return try {
+            reader.forEachIndexed { i, it ->
+                it?.setReader(devices[i])
+                it?.setListOfTemplate(listOfTemplate)
+                it?.setOnFileSaveListener(listener)
+                it?.setListener(fingerListener)
+                it?.setScanningType(scanningType!!)
+                it?.setBvnNumber(bvnNumber!!)
+            }
             if (started) {
                 Log.d("WaxdPosLib", "FingerprintService::Start -> already started")
                 return true
@@ -326,10 +357,10 @@ internal class FingerprintHelper(
     }
 
     fun stop() {
-        Log.d("WaxdPosLib", "FingerprintService::Stop")
-        run = false
-        started = false
-        close()
+        /*  Log.d("WaxdPosLib", "FingerprintService::Stop")
+          run = false
+          started = false
+          close()*/
     }
 
     fun setSavePath(path: String) {
@@ -375,6 +406,16 @@ internal class FingerprintHelper(
         } catch (e: java.lang.Exception) {
             Log.e("WaxdPosLib", "FingerprintService::enableLowPowerMode -> Exception " + e.message)
         }
+    }
+
+    fun waitFingerDetect(): CoroutineScope {
+        val scope = CoroutineScope(Dispatchers.IO)
+        scope.launch {
+            if (waitFingersDetect(level, timeout)) {
+                scanAndExtract()
+            }
+        }
+        return scope
     }
 
     fun isSessionOpen() {
@@ -551,15 +592,6 @@ internal class FingerprintHelper(
         ) {
             readerStatus = ReaderStatus.FINGERS_READ_FAILED
             sessionHelper.onSessionChanges(readerStatus, err)
-        }
-    }
-
-    fun identifyFingers() {
-        reader[0]?.identifyFingers {
-
-        }
-        reader[1]?.identifyFingers {
-
         }
     }
 

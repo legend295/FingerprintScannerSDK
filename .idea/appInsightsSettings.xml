@@ -27,10 +27,10 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="PLACEHOLDER" />
-                  <option name="mobileSdkAppId" value="" />
-                  <option name="projectId" value="" />
-                  <option name="projectNumber" value="" />
+                  <option name="appId" value="com.fingerprintscanner" />
+                  <option name="mobileSdkAppId" value="1:323597086930:android:7a0be3c4c6aa9adcf7fd0b" />
+                  <option name="projectId" value="scansdk-f1fc1" />
+                  <option name="projectNumber" value="323597086930" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />

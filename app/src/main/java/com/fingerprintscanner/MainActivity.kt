@@ -7,6 +7,10 @@ import android.util.Log
 import android.widget.Button
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.AppCompatTextView
+import com.fingerprintscanner.utility.showFieldsDialog
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.ktx.Firebase
 import com.scanner.activity.FingerprintScanner
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.ScanningType
@@ -15,11 +19,7 @@ import java.lang.StringBuilder
 
 class MainActivity : AppCompatActivity() {
     private var tvStatus: AppCompatTextView? = null
-    private val bvnNumber =
-        "coopvest823n283n23"// only for testing can be replaced with user's original bvn number
-    private val phoneNumber =
-        "12345678900"// only for testing can be replaced with user's original phone number
-
+    private var sheet: BottomSheetDialog? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -27,13 +27,26 @@ class MainActivity : AppCompatActivity() {
         val tvVerification: Button = findViewById(R.id.btnVerification)
         tvStatus = findViewById(R.id.tvStatus)
         tvRegistration.setOnClickListener {
-            FingerprintScanner.Builder().setBvnNumber(bvnNumber).setPhoneNumber(phoneNumber)
-                .setScanningType(ScanningType.REGISTRATION).start(this, scanningLauncher)
+            sheet = showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name ->
+                FingerprintScanner.Builder(this).setBvnNumber(bvnNumber).setPhoneNumber(phoneNumber)
+                    .setScanningType(ScanningType.REGISTRATION).start(this, scanningLauncher)
+            }
         }
 
         tvVerification.setOnClickListener {
-            FingerprintScanner.Builder().setBvnNumber(bvnNumber).setPhoneNumber(phoneNumber)
-                .setScanningType(ScanningType.VERIFICATION).start(this, scanningLauncher)
+            sheet = showFieldsDialog(ScanningType.VERIFICATION) { bvnNumber, _, _ ->
+                FingerprintScanner.Builder(this).setBvnNumber(bvnNumber)
+                    .setScanningType(ScanningType.VERIFICATION).start(this, scanningLauncher)
+            }
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try {
+            sheet?.dismiss()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

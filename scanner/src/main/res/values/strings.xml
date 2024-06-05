@@ -26,4 +26,6 @@
     <string name="available_version">Available Version</string>
     <string name="completed">Completed</string>
     <string name="firmware_upgrade_progress">Firmware Upgrade In-Progress Do not Back press or close the application</string>
+    <string name="downloading_fingerprints">Downloading Fingerprints</string>
+    <string name="fingerprints_download_is_in_progress_please_wait">Fingerprints download is in progress.\nPlease wait…</string>
 </resources>

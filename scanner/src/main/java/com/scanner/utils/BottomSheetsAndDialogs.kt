@@ -32,10 +32,28 @@ internal fun Context.verificationDialog(): Dialog {
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)
         title.text = "Verifying Fingerprints"
-        message.text = "The fingerprint authorization is in progress. Please tap both fingers above."
+        message.text =
+            "The fingerprint authorization is in progress. Please tap both fingers above."
         setOnClickListener {
 //            dialog.dismiss()
         }
+    }
+
+    dialog.setContentView(layout)
+    dialog.setCancelable(false)
+
+    return dialog
+}
+
+internal fun Context.templatesDownloadDialog(): Dialog {
+    val dialog = Dialog(this, R.style.DialogStyleInstagram)
+    val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+
+    with(layout) {
+        val title = findViewById<AppCompatTextView>(R.id.tvTitle)
+        val message = findViewById<AppCompatTextView>(R.id.tvMessage)
+        title.text = getString(R.string.downloading_fingerprints)
+        message.text = getString(R.string.fingerprints_download_is_in_progress_please_wait)
     }
 
     dialog.setContentView(layout)
