@@ -2,11 +2,16 @@ package com.scanner.utils
 
 import android.app.Dialog
 import android.content.Context
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.ProgressBar
+import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
+import androidx.core.content.ContextCompat
 import com.github.legend295.fingerprintscanner.R
 import com.github.legend295.fingerprintscanner.databinding.LayoutInitializationDialogBinding
+import java.util.logging.Handler
 
 internal fun Context.readersInitializationDialog(): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
@@ -24,23 +29,37 @@ internal fun Context.readersInitializationDialog(): Dialog {
     return dialog
 }
 
-internal fun Context.verificationDialog(): Dialog {
+internal fun Context.verificationDialog(isSuccess: Boolean, callback: () -> Unit): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
-//    val tvStatus = layout.findViewById<AppCompatTextView>(R.id.tvStatus)
     with(layout) {
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)
-        title.text = "Verifying Fingerprints"
+        val ivClose = findViewById<AppCompatImageView>(R.id.ivClose)
+        val ivStatus = findViewById<AppCompatImageView>(R.id.ivStatus)
+        val progressBar = findViewById<ProgressBar>(R.id.progressBar)
+        progressBar.visibility = View.GONE
+        ivClose.visibility = View.VISIBLE
+        ivStatus.visibility = View.VISIBLE
+        message.visibility = View.GONE
+        ivStatus.setImageDrawable(
+            ContextCompat.getDrawable(
+                this@verificationDialog,
+                if (isSuccess) R.drawable.ic_success else R.drawable.ic_failure
+            )
+        )
+        title.text = if (isSuccess) "Transaction Authorised" else "Transaction Failed"
         message.text =
-            "The fingerprint authorization is in progress. Please tap both fingers above."
-        setOnClickListener {
-//            dialog.dismiss()
+            if (isSuccess) "The fingerprint authorization is\nsucceeded." else "The fingerprint authorization is\nfailed."
+        ivClose.setOnClickListener {
+            dialog.dismiss()
+            callback()
         }
     }
 
     dialog.setContentView(layout)
     dialog.setCancelable(false)
+    dialog.show()
 
     return dialog
 }

@@ -37,6 +37,7 @@ import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.scanner.app.ScannerApp
+import com.scanner.model.Transaction
 import com.scanner.model.User
 import com.scanner.utils.BuilderOptions
 import com.scanner.utils.ReaderStatus
@@ -51,6 +52,7 @@ import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.readers.FingerprintHelper
 import com.scanner.utils.readersInitializationDialog
 import com.scanner.utils.templatesDownloadDialog
+import com.scanner.utils.verificationDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -100,11 +102,16 @@ internal class ScannerActivity : AppCompatActivity() {
 
     //    var textResults: TextView? = null
     private var doWeNeedToReinitialize = true
+    private var verificationDialog: Dialog? = null
+
+    private val identificationResult = HashMap<Int, NBBiometricsIdentifyResult?>()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scanner)
         listOfTemplate.clear()
         list = ArrayList()
+        identificationResult.clear()
+        verificationDialog = null
         getUser() //65112583554
 
         //Find views by id
@@ -355,23 +362,11 @@ internal class ScannerActivity : AppCompatActivity() {
             }
 
             ReaderStatus.FINGERS_VERIFICATION_SUCCESS -> {
-                val intent = Intent()
-                intent.putExtra(
-                    ScannerConstants.VERIFICATION_RESULT,
-                    true
-                ) // Add the verification data to the intent.
-                setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
-                finish() // Close the current activity.
+                setFingerprintScanningResult(result = true)
             }
 
             ReaderStatus.FINGERS_VERIFICATION_FAILED -> {
-                val intent = Intent()
-                intent.putExtra(
-                    ScannerConstants.VERIFICATION_RESULT,
-                    false
-                ) // Add the verification data to the intent.
-                setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
-                finish() // Close the current activity.
+                setFingerprintScanningResult(result = false)
             }
         }
     }
@@ -601,9 +596,13 @@ internal class ScannerActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         fingerprintHelper?.stop()
-//        enableLowPowerMode()
 //        setResult(RESULT_CANCELED)
 //        finish()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        enableLowPowerMode()
     }
 
     /**
@@ -839,19 +838,51 @@ internal class ScannerActivity : AppCompatActivity() {
         }
 
         override fun identificationResult(result: NBBiometricsIdentifyResult?, readerNo: Int) {
+            Log.d(ScannerActivity::class.simpleName, "Called times - ${readerNo}")
             if (result?.status != NBBiometricsStatus.OK) {
                 if (result?.status == NBBiometricsStatus.MATCH_NOT_FOUND) {
                     readerStatus = ReaderStatus.FINGERS_VERIFICATION_FAILED
+                    runOnUiThread {
+                        if (verificationDialog == null)
+                            verificationDialog = verificationDialog(isSuccess = false) {
+                                setFingerprintScanningResult(false)
+                            }
+                    }
                     setMessage("Match not found.")
-
                 } else {
+                    runOnUiThread {
+                        if (verificationDialog == null)
+                            verificationDialog = verificationDialog(isSuccess = false) {
+                                setFingerprintScanningResult(false)
+                            }
+                    }
                     setMessage("Fingerprint verification :- ${result?.status}")
                 }
             } else {
+                identificationResult[readerNo] = result
+            }
+            if (identificationResult.size >= 2) {
                 readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
+                runOnUiThread {
+                    if (verificationDialog == null)
+                        verificationDialog = verificationDialog(true) {
+                            setFingerprintScanningResult(result = true)
+                        }
+                }
                 setMessage("Fingerprint verification success")
+                saveTransactionToDb()
             }
         }
+    }
+
+    private fun setFingerprintScanningResult(result: Boolean) {
+        val intent = Intent()
+        intent.putExtra(
+            ScannerConstants.VERIFICATION_RESULT,
+            result
+        ) // Add the verification data to the intent.
+        setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
+        finish() // Close the current activity.
     }
 
     private fun NBDeviceScanStatus.handle(previewListenerType: PreviewListenerType) {
@@ -922,9 +953,15 @@ internal class ScannerActivity : AppCompatActivity() {
             if (message.equals("ERROR: Invalid operation", ignoreCase = true)) {
                 val msg = "Device is in low power mode.Touch the sensor to wakeup the device."
                 setMessage(msg)
+                this@ScannerActivity.readerStatus = ReaderStatus.SERVICE_BOUND
+                runOnUiThread {
+                    handleCancelButtonsVisibility(isVisible = false)
+                    setStartButtonMessage("Scan", true)
+                    getDialog()?.dismiss()
+                }
 //                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-                scope?.cancel()
-                scope = fingerprintHelper?.waitFingerDetect()
+//                scope?.cancel()
+//                scope = fingerprintHelper?.waitFingerDetect()
             } else {
                 if (isErrorMessage) {
                     message?.let { Log.e("MainActivity", it) }
@@ -1192,6 +1229,23 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun saveTransactionToDb() {
+        val transaction = Transaction(
+            scanningOptions?.amount,
+            Date(),
+            scanningOptions?.bvnNumber ?: "",
+        )
+        db.collection("transaction")/*.document(scanningOptions?.bvnNumber!!).collection("${Date()}")*/
+            .document().set(transaction)
+            .addOnSuccessListener {
+                Log.d(ScannerActivity::class.simpleName, "Success")
+            }
+            .addOnFailureListener {
+                Log.e(ScannerActivity::class.simpleName, "Failed - ${it.message}")
+                it.printStackTrace()
+            }
     }
 
     /*#endregion*/

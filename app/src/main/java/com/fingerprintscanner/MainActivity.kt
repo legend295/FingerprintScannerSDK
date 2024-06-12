@@ -27,15 +27,16 @@ class MainActivity : AppCompatActivity() {
         val tvVerification: Button = findViewById(R.id.btnVerification)
         tvStatus = findViewById(R.id.tvStatus)
         tvRegistration.setOnClickListener {
-            sheet = showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name ->
+            sheet = showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _ ->
                 FingerprintScanner.Builder(this).setBvnNumber(bvnNumber).setPhoneNumber(phoneNumber)
                     .setScanningType(ScanningType.REGISTRATION).start(this, scanningLauncher)
             }
         }
 
         tvVerification.setOnClickListener {
-            sheet = showFieldsDialog(ScanningType.VERIFICATION) { bvnNumber, _, _ ->
+            sheet = showFieldsDialog(ScanningType.VERIFICATION) { bvnNumber, _, _, amount ->
                 FingerprintScanner.Builder(this).setBvnNumber(bvnNumber)
+                    .setAmount(amount.toInt())
                     .setScanningType(ScanningType.VERIFICATION).start(this, scanningLauncher)
             }
         }

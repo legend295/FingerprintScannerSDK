@@ -598,6 +598,7 @@ internal class FingerprintHelper(
     val imageArray = HashMap<Int, ByteArray?>()
     val scanStatus = HashMap<Int, NBDeviceScanStatus?>()
     val extractStatus = HashMap<Int, NBBiometricsStatus?>()
+
     val extractionCompleteStatus = HashMap<Int, Boolean>()
 
     private val fingerListener = object : FingerprintListener {

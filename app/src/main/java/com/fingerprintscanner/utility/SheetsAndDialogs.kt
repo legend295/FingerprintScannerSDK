@@ -5,6 +5,7 @@ import android.text.InputType
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.Toast
 import androidx.appcompat.widget.AppCompatEditText
 import com.fingerprintscanner.R
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -17,23 +18,30 @@ private val phoneNumber =
 
 fun Context.showFieldsDialog(
     type: ScanningType,
-    callback: (String, String, String) -> Unit
+    callback: (String, String, String, String) -> Unit
 ): BottomSheetDialog {
     val sheet = BottomSheetDialog(this, R.style.BottomSheetStyle)
     val layout = View.inflate(this, R.layout.layout_information_dialog, null)
     val bvnNumber = layout.findViewById<AppCompatEditText>(R.id.etBvnNumber)
     val phoneNumber = layout.findViewById<AppCompatEditText>(R.id.etPhoneNumber)
+    val amount = layout.findViewById<AppCompatEditText>(R.id.etAmount)
     val name = layout.findViewById<AppCompatEditText>(R.id.etName)
     if (type == ScanningType.VERIFICATION) {
-        bvnNumber.imeOptions = EditorInfo.IME_ACTION_DONE
         phoneNumber.visibility = View.GONE
         name.visibility = View.GONE
+        amount.visibility = View.VISIBLE
+        amount.imeOptions = EditorInfo.IME_ACTION_DONE
     }
     layout.findViewById<Button>(R.id.btnDone).setOnClickListener {
+        if (amount.text.isNullOrEmpty() && type == ScanningType.VERIFICATION) {
+            Toast.makeText(sheet.context, "Amount is required", Toast.LENGTH_SHORT).show()
+            return@setOnClickListener
+        }
         callback(
             bvnNumber.text.toString(),
             phoneNumber.text.toString(),
-            name.text.toString()
+            name.text.toString(),
+            amount.text.toString()
         )
     }
     sheet.setContentView(layout)

@@ -38,6 +38,11 @@ class FingerprintScanner {
             return this
         }
 
+        fun setAmount(amount: Int): Builder {
+            options.amount = amount
+            return this
+        }
+
         /*  fun setFirebaseFireStore(firebaseFireStore: FirebaseFirestore): Builder {
               options.firebaseFireStore = firebaseFireStore
               return this
@@ -67,6 +72,9 @@ class FingerprintScanner {
             if (options.scanningType == ScanningType.REGISTRATION) {
                 if (options.phoneNumber == null) throw NullPointerException("Phone number cannot be null")
                 require(options.phoneNumber!!.isNotEmpty()) { "Phone number cannot be empty" }
+            } else if (options.scanningType == ScanningType.VERIFICATION) {
+                if (options.amount == null) throw NullPointerException("Please enter amount")
+                require((options.amount ?: 0) > 0) { "Please enter valid amount" }
             }
 //            if (options.firebaseFireStore == null) throw NullPointerException("Firebase FireStore cannot be null")
         }
