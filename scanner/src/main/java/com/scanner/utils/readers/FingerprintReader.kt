@@ -5,10 +5,12 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Environment
 import android.os.Process
+import android.util.Base64
 import android.util.Log
 import com.nextbiometrics.biometrics.NBBiometricsContext
 import com.nextbiometrics.biometrics.NBBiometricsExtractResult
 import com.nextbiometrics.biometrics.NBBiometricsFingerPosition
+import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsSecurityLevel
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -24,7 +26,13 @@ import com.nextbiometrics.devices.NBDeviceScanResult
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.system.NextBiometricsException
+import com.scanner.utils.enums.PreviewListenerType
+import com.scanner.utils.enums.ScanningType
+import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
@@ -42,9 +50,8 @@ import java.util.Locale
 
 internal class FingerprintReader(
     private val context: Context,
-    private var reader: NBDevice?,
-    private val readerNo: Int, private val listOfTemplate: ArrayList<NBBiometricsTemplate>,
-    private val listener: OnFileSavedListener
+    private val readerNo: Int
+
 ) {
     private var scanFormatInfo: NBDeviceScanFormatInfo? = null
     private var serialNo = ""
@@ -61,6 +68,13 @@ internal class FingerprintReader(
     var previewStartTime: Long = 0
     var previewEndTime: Long = 0
     var done = false
+    private lateinit var scanningType: ScanningType
+    private var bvnNumber: String = ""
+    private var dirPath = ""
+    private lateinit var fingerprintListener: FingerprintListener
+    private lateinit var listener: OnFileSavedListener
+    private lateinit var listOfTemplate: ArrayList<NBBiometricsTemplate>
+    private var reader: NBDevice? = null
 
     //    private val DEFAULT_SPI_NAME = "/dev/spidev0.0"
 //    private val DEFAULT_SYSFS_PATH = "/sys/class/gpio"
@@ -70,8 +84,9 @@ internal class FingerprintReader(
 //    private val DEFAULT_CHIP_SELECT_PIN_NUMBER = 0
     private var FLAGS = 0
     private val bufferBytes: ByteArray = byteArrayOf()
-    private val isScanAndExtractInProgress = false
+    private var isScanAndExtractInProgress = false
     private var previewListener: PreviewListener = PreviewListener()
+    var success = false
 
     // Enable and Antispoof Support
 //    private val CONFIGURE_ANTISPOOF = 108
@@ -113,6 +128,15 @@ internal class FingerprintReader(
     fun getFingerRead() = fingerRead
 
     fun getDetectLevel() = detectLevel
+
+    fun setBvnNumber(bvnNumber: String) {
+        this.bvnNumber = bvnNumber
+        dirPath = context.filesDir.path + "/$bvnNumber/"
+    }
+
+    fun setScanningType(scanningType: ScanningType) {
+        this.scanningType = scanningType
+    }
 
     fun init(): Boolean {
         Log.d("WaxdPosLib", "FingerPrintReader[$readerNo]::Init...")
@@ -290,7 +314,9 @@ internal class FingerprintReader(
                             "WaxdPosLib",
                             "FingerPrintReader[$readerNo]::ReadFinger -> Scan..."
                         )
+//                        saveTemplates()
                         scan(compression, path)
+//                        scanAndExtracts(compression, path)
                     } else {
                         Log.e(
                             "WaxdPosLib",
@@ -544,7 +570,6 @@ internal class FingerprintReader(
                 )
 
                 scanResult = reader?.scan()
-//                identifyFingers()
                 timeStop = System.currentTimeMillis()
 
                 Log.d(
@@ -594,7 +619,7 @@ internal class FingerprintReader(
                 NBDeviceFingerPosition.Unknown,
                 0
             )
-//            saveTemplates()
+//            identifyFingers()
             if (!saveImage(wsqTemplate, "wsq", path)) {
                 Log.e(
                     "WaxdPosLib",
@@ -608,6 +633,7 @@ internal class FingerprintReader(
                     "FingerprintReader[$readerNo]::Scan -> SaveBitmap FAILED"
                 )
             }
+
             Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::Scan -> Done")
             true
         } catch (e: NextBiometricsException) {
@@ -625,180 +651,6 @@ internal class FingerprintReader(
             e.printStackTrace()
             false
         }
-    }
-
-    private fun saveTemplates() {
-        val nbContext = NBBiometricsContext(reader)
-        Log.d(
-            "WaxdPosLib",
-            "FingerprintReader[$readerNo]::saveTemplates -> result = createEnrollTemplate - started..."
-        )
-        val result = nbContext.createEnrollTemplate(
-            NBBiometricsTemplateType.ISO,
-            NBBiometricsFingerPosition.UNKNOWN,
-            scanFormatInfo, NBDevice.SCAN_TIMEOUT_INFINITE, previewListener
-        )
-        Log.d(
-            "WaxdPosLib",
-            "FingerprintReader[$readerNo]::saveTemplates -> result = createEnrollTemplate - ${result?.status}"
-        )
-        if (result.status == NBBiometricsStatus.OK) {
-            val savedBytes = nbContext.saveTemplate(result.template)
-            saveTemplatesToStorage(savedBytes)
-            Log.d(
-                "WaxdPosLib",
-                "FingerprintReader[$readerNo]::saveTemplates -> result = saveTemplate - ${savedBytes.size}"
-            )
-        }
-    }
-
-    private fun identifyFingers() {
-        val extractResult: NBBiometricsExtractResult?
-        previewListener.reset()
-        val nbContext = NBBiometricsContext(reader)
-
-        Log.d(
-            "WaxdPosLib",
-            "FingerprintReader[$readerNo]::identifyFingers -> result = extracting fingers started"
-        )
-        extractResult = nbContext.extract(
-            NBBiometricsTemplateType.ISO,
-            NBBiometricsFingerPosition.UNKNOWN,
-            scanFormatInfo,
-            previewListener
-        )
-        Log.d(
-            "WaxdPosLib",
-            "FingerprintReader[$readerNo]::identifyFingers -> result = Extract Result - ${extractResult?.status}"
-        )
-        extractResult?.template?.let { listOfTemplate.add(it) }
-        if (listOfTemplate.isEmpty()) {
-            Log.d(
-                "WaxdPosLib",
-                "FingerprintReader[$readerNo]::identifyFingers -> result = listOfTemplate is empty"
-            )
-            return
-        }
-        val templates: ArrayList<AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>> =
-            ArrayList()
-
-        for (i in 0 until listOfTemplate.size - 2) {
-            Log.d(
-                "WaxdPosLib",
-                "FingerprintReader[$readerNo]::Scan -> result - adding template to list"
-            )
-            templates.add(
-                AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>(
-                    "TEST$i",
-                    listOfTemplate[i]
-                )
-            )
-        }
-
-        if (templates.size >= 2) {
-            Log.d(
-                "WaxdPosLib",
-                "FingerprintReader[$readerNo]::Scan -> result = identify - started..."
-            )
-            val result = nbContext.identify(
-                NBBiometricsTemplateType.ISO,
-                NBBiometricsFingerPosition.UNKNOWN,
-                scanFormatInfo,
-                previewListener,
-                templates.iterator(),
-                NBBiometricsSecurityLevel.NORMAL
-            )
-
-            Log.d(
-                "WaxdPosLib",
-                "FingerprintReader[$readerNo]::Scan -> result = templateId - ${result.templateId}"
-            )
-            Log.d(
-                "WaxdPosLib",
-                "FingerprintReader[$readerNo]::Scan -> result = Score - ${result.score}"
-            )
-        }
-
-
-        /* val t = nbContext.loadTemplate(NBBiometricsTemplateType.ISO, scanResult?.image)
-         listOfTemplate.add(t)
-         if (readerNo==1) {
-             val otherTemplate =
-                 ArrayList<AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>>()
-             otherTemplate.add(AbstractMap.SimpleEntry(listOfTemplate[0].hashCode(), listOfTemplate[0]))
-             val result = nbContext.identify(
-                 t,
-                 otherTemplate.iterator(),
-                 NBBiometricsSecurityLevel.NORMAL
-             )
-             Log.d(
-                 "WaxdPosLib",
-                 "FingerprintReader[$readerNo]::Scan -> result = Score - ${result.score}"
-             )
-         }*/
-
-        /*// NBBiometricsContextExtractFromScan function is used to fetch NBBiometricsExtractResult
-                // extractResult variable is used to store NBBiometricsExtractResult result
-                // TemplateType used is ISO
-                extractResult = nbContext.extract(
-                    NBBiometricsTemplateType.ISO,
-                    NBBiometricsFingerPosition.UNKNOWN,
-                    scanFormatInfo,
-                    previewListener
-                )
-                Log.d(
-                    "WaxdPosLib",
-                    "FingerprintReader[$readerNo]::Scan -> result = Extract Result - ${extractResult?.status}"
-                )
-                // Arraylist of type NBBiometricsTemplate is used to store 2 same and other 3 different fingerprints template for reference
-                listOfTemplate.add(extractResult.template)
-
-                // If list has more than 5 templates than we are using
-                // NBBiometricsContextIdentifyFromTemplate function for verify that finger prints are same or not
-                if (listOfTemplate.size > 1) {
-                    // Declaring other template variable which will store the other templated
-                    // these templates are used for verification that fingers are same or not
-                    val otherTemplate =
-                        ArrayList<AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>>()
-                    // Looping through the stored templates
-                    listOfTemplate.forEach {
-                        otherTemplate.add(AbstractMap.SimpleEntry(it.hashCode(), it))
-                    }
-                    // NBBiometricsContextIdentifyFromTemplate is used to verify that fingerprints are same or not
-                    // result is stored in result variable
-                    // Security level is set to normal
-
-                    val result = nbContext.identify(
-                        extractResult?.template,
-                        otherTemplate.iterator(),
-                        NBBiometricsSecurityLevel.HIGHEST
-                    )
-
-                    Log.d(
-                        "WaxdPosLib",
-                        "FingerprintReader[$readerNo]::Scan -> result = Score - ${result.score}"
-                    )
-                }
-
-                Log.d(
-                    "WaxdPosLib",
-                    "FingerprintReader[$readerNo]::Scan -> result = listOfTemplate - ${listOfTemplate.size}"
-                )*/
-    }
-
-    private fun saveTemplatesToStorage(savedBytes: ByteArray) {
-//        val dirPath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).toString() + "/NBCapturedImages/"
-        val dirPath = context.filesDir.path + "/NBCapturedImages/"
-        val filePath = dirPath + createFileName() + "-ISO-Template.bin"
-        val files = File(dirPath)
-        files.mkdirs()
-        Log.d(
-            "WaxdPosLib",
-            "FingerprintReader[$readerNo]::saveTemplatesToStorage -> Saving ISO template to $filePath"
-        )
-        val fos = FileOutputStream(filePath)
-        fos.write(savedBytes)
-        fos.close()
     }
 
     private fun createFileName(): String? {
@@ -830,7 +682,6 @@ internal class FingerprintReader(
             false
         }
     }
-
 
     private fun convertToBitmap(
         formatInfo: NBDeviceScanFormatInfo,
@@ -982,19 +833,31 @@ internal class FingerprintReader(
         reader?.setParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong(), spoofThreshold)
     }
 
+    fun getPreviewListener() = previewListener
 
     inner class PreviewListener : NBBiometricsScanPreviewListener {
         private var counter = 0
         private var sequence = 0
         var lastImage: ByteArray? = null
+            private set
         var timeFDET: Long = 0
+            private set
         var timeScanStart: Long = 0
+            private set
         var timeScanEnd: Long = 0
+            private set
         var timeOK: Long = 0
+            private set
         var fdetScore = 0
+            private set
+        private var lastStatus = NBDeviceScanStatus.NONE
+        var previewListenerType = PreviewListenerType.NONE
+
 
         fun reset() {
-//            showMessage("") // Placeholder for preview
+            showMessage("") // Placeholder for preview
+            lastStatus = NBDeviceScanStatus.NONE
+            previewListenerType = PreviewListenerType.NONE
             counter = 0
             sequence++
             lastImage = null
@@ -1014,31 +877,36 @@ internal class FingerprintReader(
             val image = event.image
             spoofScore = event.spoofScoreValue
             isValidSpoofScore = true
-            if (event.biometricsStatus == NBBiometricsStatus.NEED_MORE_SAMPLES) {
-                println("\tPlease lift your fingerprint and press again (new sample requested)")
-            }
             if (spoofScore <= MIN_ANTISPOOF_THRESHOLD || spoofScore > MAX_ANTISPOOF_THRESHOLD) {
                 spoofScore = MIN_ANTISPOOF_THRESHOLD
                 isValidSpoofScore = false
             }
             if (isValidSpoofScore) {
-                /* updateMessage(
-                     String.format(
-                         "PREVIEW #%d: Status: %s, Finger detect score: %d, Spoof Score: %d, image %d bytes",
-                         ++counter, event.scanStatus.toString(), event.fingerDetectValue, spoofScore,
-                         image?.size ?: 0
-                     )
-                 )*/
+                /*updateMessage(
+                    String.format(
+                        "PREVIEW #%d: Status: %s, Finger detect score: %d, Spoof Score: %d, image %d bytes",
+                        ++counter, event.scanStatus.toString(), event.fingerDetectValue, spoofScore,
+                        image?.size ?: 0
+                    )
+                )*/
             } else {
-                /* updateMessage(
-                     String.format(
-                         "PREVIEW #%d: Status: %s, Finger detect score: %d, image %d bytes",
-                         ++counter,
-                         event.scanStatus.toString(),
-                         event.fingerDetectValue,
-                         image?.size ?: 0
-                     )
-                 )*/
+                if (lastStatus != event.scanStatus) {
+                    lastStatus = event.scanStatus
+                    fingerprintListener.onReaderStatusChange(
+                        lastStatus,
+                        readerNo,
+                        previewListenerType
+                    )
+                }
+                /*updateMessage(
+                    String.format(
+                        "PREVIEW #%d: Status: %s, Finger detect score: %d, image %d bytes",
+                        ++counter,
+                        event.scanStatus.toString(),
+                        event.fingerDetectValue,
+                        image?.size ?: 0
+                    )
+                )*/
             }
             if (image != null) lastImage = image
             // Approx. time when finger was detected = last preview before operation that works with finger image
@@ -1070,11 +938,397 @@ internal class FingerprintReader(
                         "Preview scan time = %d msec,\n Finger detect score = %d",
                         previewEndTime - previewStartTime,
                         event.fingerDetectValue
-                    )
+                    ),
+                    event.fingerDetectValue
                 )*/
                 previewStartTime = System.currentTimeMillis()
             }
         }
     }
+
+    fun scanAndExtract(path: String): Boolean {
+        return try {
+            Thread {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+                //Hide Menu before scan and extract starts
+                scanExtract(path)
+            }.start()
+            true
+        } catch (e: Exception) {
+            false
+        }
+
+    }
+
+    fun startIdentification(): Boolean {
+        return try {
+            Thread {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
+                //Hide Menu before scan and extract starts
+                identification()
+            }.start()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun scanExtract(path: String): Boolean {
+        isScanAndExtractInProgress = true
+        var context: NBBiometricsContext? = null
+        try {
+            if (reader != null) {
+                context = NBBiometricsContext(reader)
+                //Antispoof check
+                val tmpSpoofThreshold = ANTISPOOF_THRESHOLD.toInt()
+                if (scanningType == ScanningType.REGISTRATION) {
+                    var extractResult: NBBiometricsExtractResult? = null
+                    showMessage("")
+                    showMessage("Extracting fingerprint template, please put your finger on sensor!")
+                    previewListener.reset()
+                    previewListener.previewListenerType = PreviewListenerType.EXTRACTION
+                    timeStop = 0
+                    timeStart = timeStop
+                    quality = 0
+                    success = false
+                    try {
+                        timeStart = System.currentTimeMillis()
+                        //Hide Menu before scan and extract starts.
+                        isScanAndExtractInProgress = true
+//                    if (isSpoofEnabled) enableSpoof()
+                        //Enable Image preview for FAP20
+                        //device.setParameter(410,1);
+                        extractResult = context.extract(
+                            NBBiometricsTemplateType.ISO,
+                            NBBiometricsFingerPosition.UNKNOWN,
+                            scanFormatInfo,
+                            previewListener
+                        )
+                        timeStop = System.currentTimeMillis()
+                    } catch (ex: Exception) {
+                        ex.printStackTrace()
+                    }
+                    if (extractResult?.status != NBBiometricsStatus.OK) {
+                        fingerprintListener.extractionResult(extractResult?.status, readerNo)
+                        return false
+//                    throw Exception("Extraction failed, reason: " + extractResult?.status)
+                    }
+
+                    if (isSpoofEnabled && isValidSpoofScore && previewListener.getSpoofScore() <= tmpSpoofThreshold) {
+                        return false
+//                    throw Exception("Extraction failed, reason: $spoofCause")
+                    }
+                    showMessage("Extracted successfully!")
+                    val template = extractResult.template
+
+                    quality = NBDevice.GetImageQuality(
+                        previewListener.lastImage,
+                        scanFormatInfo!!.width,
+                        scanFormatInfo!!.height,
+                        500,
+                        NBDeviceImageQualityAlgorithm.NFIQ
+                    )
+
+                    if (!saveImage(template.data, "wsq", path)) {
+                        Log.e(
+                            "WaxdPosLib",
+                            "FingerprintReader[$readerNo]::Scan -> SaveImage WSQ FAILED"
+                        )
+                        success = false
+                        return false
+                    }
+
+                    previewListener.lastImage?.let {
+                        val bitmap = convertToBitmaps(scanFormatInfo, it)
+                        if (!saveOnlyBitmap(bitmap, path)) {
+                            Log.e(
+                                "WaxdPosLib",
+                                "FingerprintReader[$readerNo]::Scan -> SaveBitmap FAILED"
+                            )
+                            success = false
+                            return false
+                        }
+                    }
+
+
+                    showResultOnUiThread(
+                        previewListener.lastImage, String.format(
+                            "Last scan = %d msec, Image process = %d msec, Extract = %d msec, Total time = %d msec\nTemplate quality = %d, Last finger detect score = %d",
+                            previewListener.timeScanEnd - previewListener.timeScanStart,
+                            previewListener.timeOK - previewListener.timeScanEnd,
+                            timeStop - previewListener.timeOK,
+                            timeStop - previewListener.timeScanStart,
+                            template.quality,
+                            previewListener.fdetScore
+                        ),
+                        quality
+                    )
+
+                    template.saveTemplate(context)
+                    context.dispose()
+                    context = null
+                }
+
+                if (scanningType == ScanningType.VERIFICATION) {
+                    /*// Verification
+                    //
+                    showMessage("")
+                    showMessage("Verifying fingerprint, please put your finger on sensor!")
+                    previewListener.reset()
+                    context?.dispose()
+                    context = null
+                    context = NBBiometricsContext(reader)
+                    timeStart = System.currentTimeMillis()
+                    //Enable Image preview for FAP20
+                    //reader.setParameter(410,1);
+                    val verifyResult = context.verify(
+                        NBBiometricsTemplateType.ISO,
+                        NBBiometricsFingerPosition.UNKNOWN,
+                        scanFormatInfo,
+                        previewListener,
+                        template,
+                        NBBiometricsSecurityLevel.NORMAL
+                    )
+                    timeStop = System.currentTimeMillis()
+                    if (verifyResult.status != NBBiometricsStatus.OK) {
+                        throw Exception("Not verified, reason: " + verifyResult.status)
+                    }
+                    if (isSpoofEnabled && isValidSpoofScore && previewListener.getSpoofScore() <= tmpSpoofThreshold) {
+                        throw Exception("Not verified, reason: $spoofCause")
+                    }
+                    showMessage("Verified successfully!")
+                    showResultOnUiThread(
+                        previewListener.lastImage, String.format(
+                            "Last scan = %d msec, Image process = %d msec, Extract+Verify = %d msec, Total time = %d msec\nMatch score = %d, Last finger detect score = %d",
+                            previewListener.timeScanEnd - previewListener.timeScanStart,
+                            previewListener.timeOK - previewListener.timeScanEnd,
+                            timeStop - previewListener.timeOK,
+                            timeStop - previewListener.timeScanStart,
+                            verifyResult.score,
+                            previewListener.fdetScore
+                        ),
+                        quality
+                    )*/
+                    // Identification
+                    //
+                    showMessage("")
+                    val file = File(dirPath)
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerprintReader[$readerNo]::identifyFingers -> Adding templates to list"
+                    )
+                    val fileLists = file.listFiles()
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerprintReader[$readerNo]::identifyFingers -> Files found in directory - ${fileLists?.size}"
+                    )
+                    fileLists?.forEach {
+                        loadTemplate(it.path)?.let { template -> listOfTemplate.add(template) }
+                        Thread.sleep(300)
+                    }
+                    if (listOfTemplate.isEmpty()) {
+                        Log.d(
+                            "WaxdPosLib",
+                            "FingerprintReader[$readerNo]::identifyFingers -> result = listOfTemplate is empty"
+                        )
+                        return false
+                    }
+                    val templates: ArrayList<AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>> =
+                        ArrayList()
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerprintReader[$readerNo]::identifyFingers -> result = size of templates - ${listOfTemplate.size}"
+                    )
+                    for (i in 0 until listOfTemplate.size/* - 2*/) {
+                        Log.d(
+                            "WaxdPosLib",
+                            "FingerprintReader[$readerNo]::Scan -> result - adding template to list"
+                        )
+                        templates.add(
+                            AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>(
+                                "Template$i",
+                                listOfTemplate[i]
+                            )
+                        )
+                    }
+                    // add more templates
+                    showMessage("Identifying fingerprint, please put your finger on sensor!")
+                    previewListener.reset()
+                    previewListener.previewListenerType = PreviewListenerType.IDENTIFICATION
+                    context?.dispose()
+                    context = null
+                    context = NBBiometricsContext(reader)
+                    timeStart = System.currentTimeMillis()
+                    //Enable Image preview for FAP20
+                    //reader.setParameter(410,1);
+                    val identifyResult = context.identify(
+                        NBBiometricsTemplateType.ISO,
+                        NBBiometricsFingerPosition.UNKNOWN,
+                        scanFormatInfo,
+                        previewListener,
+                        templates.iterator(),
+                        NBBiometricsSecurityLevel.NORMAL
+                    )
+                    timeStop = System.currentTimeMillis()
+                    fingerprintListener.identificationResult(result = identifyResult, readerNo)
+                    if (identifyResult.status != NBBiometricsStatus.OK) {
+                        fingerprintListener.identificationStatus(
+                            status = identifyResult.status,
+                            readerNo
+                        )
+//                        throw Exception("Not identified, reason: " + identifyResult.status)
+                    }
+                    if (isSpoofEnabled && isValidSpoofScore && previewListener.getSpoofScore() <= tmpSpoofThreshold) {
+                        throw Exception("Not identified, reason: $spoofCause")
+                    }
+                    showMessage("Identified successfully with fingerprint: " + identifyResult.templateId)
+                    showResultOnUiThread(
+                        previewListener.lastImage, String.format(
+                            "Last scan = %d msec, Image process = %d msec, Extract+Identify = %d msec, Total time = %d msec\nMatch score = %d, Last finger detect score = %d",
+                            previewListener.timeScanEnd - previewListener.timeScanStart,
+                            previewListener.timeOK - previewListener.timeScanEnd,
+                            timeStop - previewListener.timeOK,
+                            timeStop - previewListener.timeScanStart,
+                            identifyResult.score,
+                            previewListener.fdetScore
+                        ),
+                        quality
+                    )
+
+                }
+                success = true
+            }
+        } catch (ex: NextBiometricsException) {
+            showMessage("ERROR: NEXT Biometrics SDK error: $ex", true)
+            ex.printStackTrace()
+        } catch (ex: Throwable) {
+            showMessage("ERROR: " + ex.message, true)
+            ex.printStackTrace()
+        }
+        if (context != null) {
+            context.dispose()
+            context = null
+        }
+        fingerprintListener.onScanExtractCompleted(readerNo)
+        return success
+    }
+
+    private fun NBBiometricsTemplate.saveTemplate(context: NBBiometricsContext) {
+        // Save template
+        val files = File(dirPath)
+        if (files.isDirectory &&
+            (files.listFiles().isNullOrEmpty() || (files.listFiles()?.size ?: 0) <= 1) ||
+            !files.exists()
+        ) {
+            val binaryTemplate = context.saveTemplate(this)
+            showMessage(
+                String.format(
+                    "Extracted template length: %d bytes",
+                    binaryTemplate.size
+                )
+            )
+            val base64Template = Base64.encodeToString(binaryTemplate, 0)
+            showMessage("Extracted template: $base64Template")
+
+            // Store template to file
+//                val dirPath = this.context.filesDir.path + "/NBCapturedImages/"
+            files.mkdirs()
+
+            val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.bin"
+            showMessage("Saving ISO template to $filePath")
+            val fos = FileOutputStream(filePath)
+            fos.write(binaryTemplate)
+            fos.close()
+
+
+            listener.onTemplateSaveSuccess(filePath, readerNo)
+        }
+    }
+
+    private fun identification() {
+
+    }
+
+    private fun showMessage(message: String) {
+        showMessage(message, false)
+    }
+
+    private fun showMessage(message: String?, isErrorMessage: Boolean) {
+        fingerprintListener.showMessage(message, isErrorMessage, readerNo)
+    }
+
+    private fun updateMessage(message: String) {
+        fingerprintListener.updateMessage(message, readerNo)
+    }
+
+    private fun showResultOnUiThread(image: ByteArray?, text: String, quality: Int) {
+        showResult(image, text, quality)
+    }
+
+    private fun showResult(image: ByteArray?, text: String?, quality: Int) {
+        if (image != null) {
+            fingerprintListener.showResult(
+                image,
+                text,
+                convertToBitmaps(scanFormatInfo, image),
+                readerNo,
+                quality
+            )
+        }
+    }
+
+    private fun convertToBitmaps(formatInfo: NBDeviceScanFormatInfo?, image: ByteArray): Bitmap {
+        val buf = IntBuffer.allocate(image.size)
+        for (pixel in image) {
+            val grey = pixel.toInt() and 0x0ff
+            buf.put(Color.argb(255, grey, grey, grey))
+        }
+        val bufferBytes = image
+        return Bitmap.createBitmap(
+            buf.array(),
+            formatInfo!!.width,
+            formatInfo.height,
+            Bitmap.Config.ARGB_8888
+        )
+    }
+
+    private fun saveOnlyBitmap(bitmap: Bitmap, path: String): Boolean {
+        return try {
+            val filePath = "$path$readerNo.jpg"
+            Log.d(
+                "WaxdPosLib",
+                "FingerprintReader[$readerNo]::SaveBitmap -> Saving Bitmap to $filePath"
+            )
+            val out = FileOutputStream(filePath)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            out.flush()
+            out.close()
+            listener.onBitmapSaveSuccess(filePath, readerNo)
+            true
+        } catch (e: java.lang.Exception) {
+            Log.e(
+                "WaxdPosLib",
+                "FingerprintReader[" + readerNo + "]::SaveBitmap -> Exception: " + e.message
+            )
+            false
+        }
+    }
+
+    fun setListener(fingerprintListener: FingerprintListener) {
+        this.fingerprintListener = fingerprintListener
+    }
+
+    fun setOnFileSaveListener(listener: OnFileSavedListener) {
+        this.listener = listener
+    }
+
+    fun setListOfTemplate(listOfTemplate: ArrayList<NBBiometricsTemplate>) {
+        this.listOfTemplate = listOfTemplate
+    }
+
+    fun setReader(reader: NBDevice) {
+        this.reader = reader
+    }
+
 
 }

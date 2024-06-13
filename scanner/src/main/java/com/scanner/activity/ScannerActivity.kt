@@ -5,37 +5,66 @@ import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.scanner.utils.helper.ReaderSessionHelper
-import com.scanner.utils.ReaderStatus
-import com.scanner.utils.readers.FingerprintHelper
 import com.github.legend295.fingerprintscanner.R
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.Source
+import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.ktx.Firebase
+import com.google.firebase.storage.StorageReference
+import com.google.firebase.storage.ktx.storage
+import com.google.gson.Gson
+import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
+import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
+import com.nextbiometrics.devices.NBDeviceScanStatus
+import com.scanner.app.ScannerApp
+import com.scanner.model.Transaction
+import com.scanner.model.User
+import com.scanner.utils.BuilderOptions
+import com.scanner.utils.ReaderStatus
+import com.scanner.utils.constants.Constant
 import com.scanner.utils.constants.Constant.FINGER_PRINT_READ_INFO
 import com.scanner.utils.constants.ScannerConstants
+import com.scanner.utils.enums.PreviewListenerType
+import com.scanner.utils.enums.ScanningType
+import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
+import com.scanner.utils.helper.ReaderSessionHelper
+import com.scanner.utils.readers.FingerprintHelper
 import com.scanner.utils.readersInitializationDialog
+import com.scanner.utils.templatesDownloadDialog
+import com.scanner.utils.verificationDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.Timer
+import java.util.TimerTask
 
-class ScannerActivity : AppCompatActivity(),
-    ReaderSessionHelper {
+internal class ScannerActivity : AppCompatActivity() {
 
     private var tvStatus: AppCompatTextView? = null
     private var tvLeftQuality: AppCompatTextView? = null
@@ -44,29 +73,48 @@ class ScannerActivity : AppCompatActivity(),
     private var btnCancel: AppCompatButton? = null
     private var ivScannerLeft: AppCompatImageView? = null
     private var ivScannerRight: AppCompatImageView? = null
+    private var messagesHolder: LinearLayout? = null
+    private var scrollView: ScrollView? = null
 
     private var leftQuality: String? = null
     private var rightQuality: String? = null
+    private var scanningOptions: BuilderOptions? = null
 
-    private val list: ArrayList<File> =
+    private var list: ArrayList<File> =
         ArrayList() // this will store the response of the saved files
     private val listOfTemplate = ArrayList<NBBiometricsTemplate>()
-    private val fingerprintHelper by lazy {
-        FingerprintHelper(
-            this,
-            this,
-            listOfTemplate,
-            onFileSavedListener
-        )
-    }
+    private var fingerprintHelper: FingerprintHelper? = null
     private var readerStatus: ReaderStatus = ReaderStatus.NONE
     private val tag = ScannerActivity::class.java.simpleName
     private val difFingerprintReadInfo = FINGER_PRINT_READ_INFO
     private var dialog: Dialog? = null
+    private var templateDownloadDialog: Dialog? = null
+
+    //for display message
+    private var lastMessage: TextView? = null
+    private val db = Firebase.firestore
+
+    // Create a storage reference from our app
+    private val storage = Firebase.storage
+    private val storageRef = storage.reference
+    private val uploadedFileRefs = ArrayList<String>()
+    private val localFileRefs = ArrayList<String>()
+
+    //    var textResults: TextView? = null
+    private var doWeNeedToReinitialize = true
+    private var verificationDialog: Dialog? = null
+
+    private val identificationResult = HashMap<Int, NBBiometricsIdentifyResult?>()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scanner)
+        listOfTemplate.clear()
+        list = ArrayList()
+        identificationResult.clear()
+        verificationDialog = null
+        getUser() //65112583554
 
+        //Find views by id
         tvStatus = findViewById(R.id.tvStatus)
         btnStart = findViewById(R.id.btnStart)
         btnCancel = findViewById(R.id.btnCancel)
@@ -74,9 +122,46 @@ class ScannerActivity : AppCompatActivity(),
         ivScannerRight = findViewById(R.id.ivScannerRight)
         tvLeftQuality = findViewById(R.id.tvLeftQuality)
         tvRightQuality = findViewById(R.id.tvRightQuality)
+        messagesHolder = findViewById(R.id.messagesHolder)
+        scrollView = findViewById(R.id.scrollView1)
+
+        /*  doWeNeedToReinitialize = true
+          fingerprintHelper = FingerprintHelper(
+              this
+          )
+  */
+        if (ScannerApp.getInstance().fingerprintHelper == null) {
+            doWeNeedToReinitialize = true
+            fingerprintHelper = FingerprintHelper(
+                this
+            )
+            ScannerApp.getInstance().fingerprintHelper = fingerprintHelper
+        } else {
+            doWeNeedToReinitialize = false
+            fingerprintHelper = ScannerApp.getInstance().fingerprintHelper
+        }
+
+        fingerprintHelper?.setSessionHelper(sessionHelper = onSessionChanges)
+        fingerprintHelper?.setFingerprintListener(fingerprintListener = fingerprintListener)
+        fingerprintHelper?.setListOfTemplate(listOfTemplate = listOfTemplate)
+        fingerprintHelper?.setOnFileSaveListener(listener = onFileSavedListener(list))
+
+
+        val bundle = intent.extras
+        val options = bundle?.getString(Constant.SCANNING_OPTIONS)
+        scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
+        scanningOptions?.bvnNumber?.let { fingerprintHelper?.setBvnNumber(it) }
+        scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
+        scanningOptions?.bvnNumber?.let {
+            getUser(it) { userFound ->
+                if (!userFound) {
+                    saveUserToDb()
+                }
+            }
+        }
 
         // Initialize Fingerprint readers on background thread on main thread UI will stuck
-        initialize()
+        init()
 
         btnStart?.setOnClickListener {
             if (checkStorageAndCameraPermission()) {
@@ -88,10 +173,38 @@ class ScannerActivity : AppCompatActivity(),
 
         btnCancel?.setOnClickListener {
             btnCancel?.isEnabled = false
-            fingerprintHelper.cancelTap()
-            fingerprintHelper.stop()
+            fingerprintHelper?.cancelTap()
+            fingerprintHelper?.stop()
             setResult(RESULT_CANCELED)
             finish()
+        }
+    }
+
+    private fun init() {
+        if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+            initialize()
+        } else {
+            if (checkUserHasFilesInLocalStorage()) {
+                initialize()
+            } else {
+                showFingerprintDownloadDialog()
+                scanningOptions?.bvnNumber?.let {
+                    getUser(it) { userFound ->
+                        if (userFound) {
+                            downloadFilesFromFirebaseStorage { isSuccess ->
+                                hideFingerprintDownloadDialog()
+                                if (isSuccess) {
+                                    initialize()
+                                } else finish()
+                            }
+                        } else {
+                            hideFingerprintDownloadDialog()
+                            Toast.makeText(this, "User not found.", Toast.LENGTH_SHORT).show()
+                            finish()
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -105,13 +218,17 @@ class ScannerActivity : AppCompatActivity(),
      * tracking without crashing the application.
      */
     private fun initialize() {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                fingerprintHelper.init()
-            } catch (e: Exception) {
-                e.printStackTrace()
+        if (fingerprintHelper?.isInit() != true) {
+            showFingerprintInitializationDialog()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    fingerprintHelper?.init()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
+
     }
 
     /**
@@ -127,8 +244,33 @@ class ScannerActivity : AppCompatActivity(),
     private fun getDialog(): Dialog? {
         if (dialog == null) {
             dialog = readersInitializationDialog()
-        } else dialog
+        }
         return dialog
+    }
+
+    private fun getTemplateDownloadDialog(): Dialog? {
+        if (templateDownloadDialog == null) {
+            templateDownloadDialog = templatesDownloadDialog()
+        }
+        return templateDownloadDialog
+    }
+
+    private fun showFingerprintInitializationDialog() {
+        runOnUiThread {
+            getDialog()?.show()
+        }
+    }
+
+    private fun showFingerprintDownloadDialog() {
+        runOnUiThread {
+            getTemplateDownloadDialog()?.show()
+        }
+    }
+
+    private fun hideFingerprintDownloadDialog() {
+        runOnUiThread {
+            getTemplateDownloadDialog()?.dismiss()
+        }
     }
 
     /**
@@ -159,10 +301,16 @@ class ScannerActivity : AppCompatActivity(),
         when (readerStatus) {
             // Handles the case when the service is bound to the application or a session with the reader is already open.
             ReaderStatus.SERVICE_BOUND, ReaderStatus.SESSION_OPEN -> {
-                setMessage("Please tap your both fingers on readers.") // Prompt the user to scan their fingerprints.
+                /* if (scanningOptions?.scanningType == ScanningType.REGISTRATION)
+                     setMessage("Please put your both fingers on sensor.") // Prompt the user to scan their fingerprints.
+                 else setMessage("Please put your both fingers on sensor for verification.")*/
+                setMessage("Please wait for sensor initialization")
                 handleCancelButtonsVisibility(isVisible = true) // Make the cancel buttons visible.
-                setStartButtonMessage("", isVisible = false) // Hide the start button by making its message empty and its visibility false.
-                fingerprintHelper.waitFingerRead(difFingerprintReadInfo) // Wait for the fingerprint read to complete.
+                setStartButtonMessage(
+                    "",
+                    isVisible = false
+                ) // Hide the start button by making its message empty and its visibility false.
+                fingerprintHelper?.scanAndExtract()
             }
 
             // Handles cases when the session is closed or initializing the reader failed.
@@ -170,12 +318,8 @@ class ScannerActivity : AppCompatActivity(),
                 // Cancel any ongoing tap operations and reinitialize the finger scanner.
 
                 list.clear() // Clear the data list.
-                fingerprintHelper.cancelTap() // Cancel the finger scanning operation.
+                fingerprintHelper?.cancelTap() // Cancel the finger scanning operation.
                 initialize() // Attempt to initialize or reinitialize the reader.
-                // Display an initializing dialog to the user.
-                runOnUiThread {
-                    getDialog()?.show()
-                }
             }
 
             ReaderStatus.NONE -> {
@@ -186,7 +330,8 @@ class ScannerActivity : AppCompatActivity(),
             ReaderStatus.FINGERS_READ_SUCCESS, ReaderStatus.FINGERS_RELEASED -> {
                 if (list.isEmpty()) { // Check if the data list is unexpectedly empty.
                     runOnUiThread {
-                        Toast.makeText(this, "No data found.", Toast.LENGTH_SHORT).show() // Inform the user no data was found.
+                        Toast.makeText(this, "No data found.", Toast.LENGTH_SHORT)
+                            .show() // Inform the user no data was found.
                     }
                     return
                 }
@@ -199,26 +344,36 @@ class ScannerActivity : AppCompatActivity(),
             ReaderStatus.FINGERS_READ_FAILED -> {
                 // Handle scanner read failures here.
             }
+
             ReaderStatus.FINGERS_DETECTED -> {
                 // Handle the case where fingers are detected but not yet read.
             }
+
             ReaderStatus.TAP_CANCELLED -> {
-                fingerprintHelper.stop() // Stop the fingerprint helper function when a tap is cancelled.
+                fingerprintHelper?.stop() // Stop the fingerprint helper function when a tap is cancelled.
             }
 
             ReaderStatus.LOW_FINGERS_QUALITY -> {
-                setMessage("Please tap your both fingers on readers.") // Ask the user to retry scanning due to low fingerprint quality.
+                setMessage("Please put your both fingers on sensor.") // Ask the user to retry scanning due to low fingerprint quality.
                 handleCancelButtonsVisibility(isVisible = true) // Ensure cancel buttons are visible for a possible cancel action.
                 setStartButtonMessage("", isVisible = false) // Hide the start button.
                 resetImages() // Reset any fingerprint images or related visuals.
-                fingerprintHelper.waitFingerRead(difFingerprintReadInfo) // Wait again for a fingerprint read.
+                fingerprintHelper?.scanAndExtract() // scan and extract again
+            }
+
+            ReaderStatus.FINGERS_VERIFICATION_SUCCESS -> {
+                setFingerprintScanningResult(result = true)
+            }
+
+            ReaderStatus.FINGERS_VERIFICATION_FAILED -> {
+                setFingerprintScanningResult(result = false)
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        fingerprintHelper.isSessionOpen()
+        fingerprintHelper?.isSessionOpen()
     }
 
     /**
@@ -230,80 +385,98 @@ class ScannerActivity : AppCompatActivity(),
      * @param readerStatus The current status of the fingerprint reader session, indicating the state change.
      * @param data Optional data that might be provided with certain status changes, such as fingerprint data on a successful read.
      */
-
-    override fun onSessionChanges(readerStatus: ReaderStatus, data: String?) {
-        this.readerStatus = readerStatus
-        when (readerStatus) {
-            ReaderStatus.NONE -> {
-                //Initial value of the readers and readers are not initialized in this phase
+    private val onSessionChanges = object : ReaderSessionHelper {
+        override fun onSessionChanges(readerStatus: ReaderStatus, data: String?) {
+            this@ScannerActivity.readerStatus = readerStatus
+            when (readerStatus) {
+                ReaderStatus.NONE -> {
+                    //Initial value of the readers and readers are not initialized in this phase
 //                setMessage(getString(R.string.initializing))
-                runOnUiThread {
-                    getDialog()?.show()
+                    /* runOnUiThread {
+                         getDialog()?.show()
+                     }*/
                 }
-            }
 
-            ReaderStatus.SERVICE_BOUND -> {
-                //Start scanning process readers are initialized
-                setMessage(getString(R.string.scan))
-                runOnUiThread {
-                    setStartButtonMessage("Scan", true)
-                    getDialog()?.dismiss()
+                ReaderStatus.SERVICE_BOUND -> {
+                    //Start scanning process readers are initialized
+                    setMessage(getString(R.string.scan))
+                    runOnUiThread {
+                        setStartButtonMessage("Scan", true)
+                        getDialog()?.dismiss()
+                    }
+                    if (fingerprintHelper?.start() == true) {
+//                    fingerprintHelper.scanAndExtract()
+                        Log.d(tag, "START OK")
+                    } else {
+                        Log.d(tag, "START FAILED")
+                    }
                 }
-                if (fingerprintHelper.start()) {
-                    Log.d(tag, "START OK")
-                } else {
-                    Log.d(tag, "START FAILED")
+
+                ReaderStatus.INIT_FAILED -> {
+                    runOnUiThread {
+                        getDialog()?.dismiss()
+                    }
+                    setMessage(getString(R.string.initializing_failed))
+                    setStartButtonMessage("Retry", true)
+                    handleCancelButtonsVisibility(isVisible = false)
                 }
-            }
 
-            ReaderStatus.INIT_FAILED -> {
-                runOnUiThread {
-                    getDialog()?.dismiss()
+                ReaderStatus.FINGERS_RELEASED -> {
+
+
+//                fingerprintHelper.identifyFingers()
                 }
-                setMessage(getString(R.string.initializing_failed))
-                setStartButtonMessage("Retry", true)
-                handleCancelButtonsVisibility(isVisible = false)
-            }
 
-            ReaderStatus.FINGERS_RELEASED -> {
-                data?.setFingerQuality()
-            }
+                ReaderStatus.FINGERS_READ_SUCCESS -> {
+                    // save prints to storage and return the response through interface to main activity
+                    setStartButtonMessage("Done", true)
+                    handleCancelButtonsVisibility(isVisible = false)
+                    setMessage(getString(R.string.read_success))
+//                data?.setFingerQuality()
 
-            ReaderStatus.FINGERS_READ_SUCCESS -> {
-                // save prints to storage and return the response through interface to main activity
-                setStartButtonMessage("Done", true)
-                handleCancelButtonsVisibility(isVisible = false)
-                setMessage(getString(R.string.read_success))
-                fingerprintHelper.waitFingersRelease()
+//                fingerprintHelper.waitFingersRelease()
 //                enableLowPowerMode()
-                /* if (list.size > 8) {
-                     setMessage("Please check logcat for biometric verification result. Restart the app to scan again.")
-                 } else*/
-                /*
-                val intent = Intent()
-                intent.putExtra(ScannerConstants.DATA, list)
-                setResult(RESULT_OK, intent)
-                finish()*/
+                    /* if (list.size > 8) {
+                         setMessage("Please check logcat for biometric verification result. Restart the app to scan again.")
+                     } else*/
+                    /*
+                    val intent = Intent()
+                    intent.putExtra(ScannerConstants.DATA, list)
+                    setResult(RESULT_OK, intent)
+                    finish()*/
 
-            }
+                }
 
-            ReaderStatus.FINGERS_READ_FAILED -> {}
-            ReaderStatus.SESSION_CLOSED -> {
-                setStartButtonMessage("Retry", true)
-                setMessage(getString(R.string.session_closed_retry))
-            }
+                ReaderStatus.FINGERS_READ_FAILED -> {}
+                ReaderStatus.SESSION_CLOSED -> {
+                    setStartButtonMessage("Retry", true)
+                    setMessage(getString(R.string.session_closed_retry))
+                }
 
-            ReaderStatus.SESSION_OPEN -> {
-                setStartButtonMessage("Start", true)
-                setMessage(getString(R.string.scan))
-            }
+                ReaderStatus.SESSION_OPEN -> {
+                    setMessage(getString(R.string.scan))
+                    setStartButtonMessage("Scan", true)
 
-            ReaderStatus.FINGERS_DETECTED -> {
+                    runOnUiThread {
+                        getDialog()?.dismiss()
+                    }
+                    if (fingerprintHelper?.start() == true) {
+//                    fingerprintHelper.scanAndExtract()
+                        Log.d(tag, "START OK")
+                    } else {
+                        Log.d(tag, "START FAILED")
+                    }
+                }
+
+                ReaderStatus.FINGERS_DETECTED -> {
 //                setMessage(getString(R.string.fingers_detected))
-            }
+                }
 
-            ReaderStatus.TAP_CANCELLED -> {}
-            ReaderStatus.LOW_FINGERS_QUALITY -> {}
+                ReaderStatus.TAP_CANCELLED -> {}
+                ReaderStatus.LOW_FINGERS_QUALITY -> {}
+                ReaderStatus.FINGERS_VERIFICATION_SUCCESS -> {}
+                ReaderStatus.FINGERS_VERIFICATION_FAILED -> {}
+            }
         }
     }
 
@@ -321,11 +494,17 @@ class ScannerActivity : AppCompatActivity(),
      * Proper error handling and UI thread handling (via runOnUiThread) are demonstrated for robustness.
      */
 
-    private val onFileSavedListener = object : OnFileSavedListener {
+    private fun onFileSavedListener(list: ArrayList<File>) = object : OnFileSavedListener {
         override fun onSuccess(path: String, readerNo: Int) {
             val file = File(path)
             Log.d(ScannerActivity::class.simpleName, file.name)
+            /*if (list.size >= 2)
+                list.clear()*/
             list.add(file)
+            Log.d(
+                ScannerActivity::class.simpleName,
+                "onFileSavedListener::onSuccess - List size -> ${list.size}"
+            )
         }
 
         override fun onBitmapSaveSuccess(path: String, readerNo: Int) {
@@ -340,6 +519,17 @@ class ScannerActivity : AppCompatActivity(),
 
         override fun onFailure(e: Exception) {
             e.printStackTrace()
+        }
+
+        override fun onTemplateSaveSuccess(path: String, readerNo: Int) {
+            val file = File(path)
+            localFileRefs.add(path)
+            updateUserInDb(
+                scanningOptions?.bvnNumber!!,
+                hashMapOf("fingerPrintLocalPath" to localFileRefs)
+            )
+            Log.d(ScannerActivity::class.simpleName, file.name)
+            uploadFileFromLocalToFirebaseStorage(scanningOptions?.bvnNumber!!, Uri.fromFile(file))
         }
     }
 
@@ -394,26 +584,25 @@ class ScannerActivity : AppCompatActivity(),
     private fun setStartButtonMessage(msg: String, isVisible: Boolean) {
         runOnUiThread {
             btnStart?.text = msg
-            btnStart?.visibility = if (isVisible) View.VISIBLE else View.GONE
+            btnStart?.visibility = if (isVisible) View.VISIBLE else View.INVISIBLE
         }
     }
 
     //Enable low power mode when finger scanning success
     // But enabling this will cause issues while termination of NBDevices and this error cause issue while reinitializing the readers
     //
-    private fun enableLowPowerMode() = fingerprintHelper.enableLowPowerMode()
-
-    override fun onDestroy() {
-        super.onDestroy()
-//        enableLowPowerMode()
-
-    }
+    private fun enableLowPowerMode() = fingerprintHelper?.enableLowPowerMode()
 
     override fun onStop() {
         super.onStop()
-        fingerprintHelper.stop()
-        setResult(RESULT_CANCELED)
-        finish()
+        fingerprintHelper?.stop()
+//        setResult(RESULT_CANCELED)
+//        finish()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        enableLowPowerMode()
     }
 
     /**
@@ -604,6 +793,462 @@ class ScannerActivity : AppCompatActivity(),
         }
     }
 
+    private val fingerprintListener = object : FingerprintListener {
+        override fun showResult(
+            image: ByteArray?,
+            text: String?,
+            bitmap: Bitmap,
+            readerNo: Int,
+            quality: Int
+        ) {
+            this@ScannerActivity.showResult(image, text, bitmap, readerNo, quality)
+        }
+
+        override fun updateMessage(message: String, readerNo: Int) {
+            this@ScannerActivity.updateMessage(message)
+        }
+
+        override fun showMessage(message: String?, isErrorMessage: Boolean, readerNo: Int) {
+            this@ScannerActivity.showMessage(message, isErrorMessage)
+        }
+
+        override fun onScanExtractCompleted(readerNo: Int) {
+            this@ScannerActivity.onScanExtractCompleted()
+        }
+
+        override fun onReaderStatusChange(
+            status: NBDeviceScanStatus?,
+            readerNo: Int,
+            previewListenerType: PreviewListenerType
+        ) {
+            status?.handle(previewListenerType)
+        }
+
+        override fun extractionResult(status: NBBiometricsStatus?, readerNo: Int) {
+            if (status == NBBiometricsStatus.BAD_QUALITY) {
+                list.clear()
+                readerStatus = ReaderStatus.LOW_FINGERS_QUALITY
+                setMessage("Scanned fingers quality is bad. Please scan again")
+                handleCancelButtonsVisibility(isVisible = false)
+                setStartButtonMessage("Scan again", isVisible = true)
+            }
+        }
+
+        override fun identificationStatus(status: NBBiometricsStatus?, readerNo: Int) {
+        }
+
+        override fun identificationResult(result: NBBiometricsIdentifyResult?, readerNo: Int) {
+            Log.d(ScannerActivity::class.simpleName, "Called times - ${readerNo}")
+            if (result?.status != NBBiometricsStatus.OK) {
+                if (result?.status == NBBiometricsStatus.MATCH_NOT_FOUND) {
+                    readerStatus = ReaderStatus.FINGERS_VERIFICATION_FAILED
+                    runOnUiThread {
+                        if (verificationDialog == null)
+                            verificationDialog = verificationDialog(isSuccess = false) {
+                                setFingerprintScanningResult(false)
+                            }
+                    }
+                    setMessage("Match not found.")
+                } else {
+                    runOnUiThread {
+                        if (verificationDialog == null)
+                            verificationDialog = verificationDialog(isSuccess = false) {
+                                setFingerprintScanningResult(false)
+                            }
+                    }
+                    setMessage("Fingerprint verification :- ${result?.status}")
+                }
+            } else {
+                identificationResult[readerNo] = result
+            }
+            if (identificationResult.size >= 2) {
+                readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
+                runOnUiThread {
+                    if (verificationDialog == null)
+                        verificationDialog = verificationDialog(true) {
+                            setFingerprintScanningResult(result = true)
+                        }
+                }
+                setMessage("Fingerprint verification success")
+                saveTransactionToDb()
+            }
+        }
+    }
+
+    private fun setFingerprintScanningResult(result: Boolean) {
+        val intent = Intent()
+        intent.putExtra(
+            ScannerConstants.VERIFICATION_RESULT,
+            result
+        ) // Add the verification data to the intent.
+        setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
+        finish() // Close the current activity.
+    }
+
+    private fun NBDeviceScanStatus.handle(previewListenerType: PreviewListenerType) {
+        when (this) {
+            NBDeviceScanStatus.NONE -> {}
+            NBDeviceScanStatus.OK -> {}
+            NBDeviceScanStatus.CANCELED -> {}
+            NBDeviceScanStatus.TIMEOUT -> {}
+            NBDeviceScanStatus.NO_FINGER -> {}
+            NBDeviceScanStatus.NOT_REMOVED -> {}
+            NBDeviceScanStatus.BAD_QUALITY -> {}
+            NBDeviceScanStatus.BAD_SIZE -> {}
+            NBDeviceScanStatus.SPOOF -> {}
+            NBDeviceScanStatus.EMPTY -> {}
+            NBDeviceScanStatus.DONE -> {
+                if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+                    readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                    setStartButtonMessage("Done", true)
+                    handleCancelButtonsVisibility(isVisible = false)
+                    setMessage(getString(R.string.read_success))
+                } else {
+                    if (previewListenerType == PreviewListenerType.EXTRACTION) {
+                        readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                        setMessage("Finger read success. Verification in progress.")
+                    } else {
+                        readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
+                        setStartButtonMessage("Done", true)
+                        handleCancelButtonsVisibility(isVisible = false)
+                        setMessage(getString(R.string.read_success))
+                    }
+                }
+//                fingerprintHelper.waitFingersRelease()
+            }
+
+            NBDeviceScanStatus.LIFT_FINGER -> {
+                setMessage("Please lift fingers")
+            }
+
+            NBDeviceScanStatus.WAIT_FOR_SENSOR_INITIALIZATION -> {
+                setMessage("Please wait for sensor initialization")
+            }
+
+            NBDeviceScanStatus.PUT_FINGER_ON_SENSOR -> {
+                setMessage("Please put you finger on Sensor.")
+            }
+
+            NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR -> {
+                setMessage("Please keep finger on sensor")
+            }
+
+            NBDeviceScanStatus.WAIT_FOR_DATA_PROCESSING -> {
+                setMessage("Please wait, processing data...")
+            }
+
+            NBDeviceScanStatus.SPOOF_DETECTED -> {}
+        }
+    }
+
+    fun onScanExtractCompleted() {
+        runOnUiThread {
+            btnStart?.isEnabled = true
+        }
+    }
+
+    private var scope: CoroutineScope? = null
+    private fun showMessage(message: String?, isErrorMessage: Boolean) {
+        runOnUiThread {
+            if (message.equals("ERROR: Invalid operation", ignoreCase = true)) {
+                val msg = "Device is in low power mode.Touch the sensor to wakeup the device."
+                setMessage(msg)
+                this@ScannerActivity.readerStatus = ReaderStatus.SERVICE_BOUND
+                runOnUiThread {
+                    handleCancelButtonsVisibility(isVisible = false)
+                    setStartButtonMessage("Scan", true)
+                    getDialog()?.dismiss()
+                }
+//                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+//                scope?.cancel()
+//                scope = fingerprintHelper?.waitFingerDetect()
+            } else {
+                if (isErrorMessage) {
+                    message?.let { Log.e("MainActivity", it) }
+                } else {
+                    message?.let { Log.i("MainActivity", it) }
+                }
+
+                val singleMessage = TextView(applicationContext)
+                if (isErrorMessage) singleMessage.setTextColor(resources.getColor(R.color.error_message_color))
+                singleMessage.append(message)
+                messagesHolder?.addView(singleMessage)
+                lastMessage = singleMessage
+            }
+        }
+
+        // Scroll to the end. This must be done with a delay, after the last message is drawn
+        val timer = Timer()
+        timer.schedule(object : TimerTask() {
+            override fun run() {
+                runOnUiThread {
+//                    val scrollView = findViewById<ScrollView>(R.id.scrollView1)
+                    scrollView?.fullScroll(View.FOCUS_DOWN)
+                }
+            }
+        }, 100)
+    }
+
+    private fun updateMessage(message: String) {
+        runOnUiThread {
+            Log.i(
+                "MainActivity",
+                String.format("%d: %s", System.currentTimeMillis(), message)
+            )
+            if (lastMessage != null) {
+                lastMessage?.text = message
+            }
+        }
+    }
+
+    fun showResult(image: ByteArray?, text: String?, bitmap: Bitmap, readerNo: Int, quality: Int) {
+        runOnUiThread {
+            if (image != null) {
+                if (readerNo == 0) {
+                    ivScannerLeft?.setImageBitmap(bitmap)
+                } else ivScannerRight?.setImageBitmap(bitmap)
+            } else {
+                if (readerNo == 0) {
+                    ivScannerLeft?.setImageResource(R.drawable.ic_android_fingerprint_grey)
+                } else ivScannerRight?.setImageResource(R.drawable.ic_android_fingerprint_grey)
+            }
+            text?.let { Log.i("MainActivity", it) }
+            text?.let { Log.i("MainActivity", "quality[$readerNo] $quality") }
+            if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+                val leftQualityPercentage: Double
+                val rightQualityPercentage: Double
+                if (readerNo == 0) {
+                    leftQualityPercentage = (((5.0 - quality.toDouble()) / 4.0) * 100.0)
+                    this@ScannerActivity.leftQuality = "${leftQualityPercentage.toInt()}%"
+
+                } else {
+                    rightQualityPercentage = (((5.0 - quality.toDouble()) / 4.0) * 100.0)
+                    this@ScannerActivity.rightQuality = "${rightQualityPercentage.toInt()}%"
+                }
+                runOnUiThread {
+                    tvLeftQuality?.text = this@ScannerActivity.leftQuality
+                    tvRightQuality?.text = this@ScannerActivity.rightQuality
+                }
+            }
+//            checkQualityOfFingers(leftQualityPercentage.toInt(), rightQualityPercentage.toInt())
+        }
+    }
+
+    private fun saveUserToDb() {
+        val user = User(
+            scanningOptions?.bvnNumber ?: "",
+            "alskdfjlaf",
+            "nskjds",
+            scanningOptions?.phoneNumber ?: "",
+            "Coopvest",
+            "Agent",
+            if (scanningOptions?.scanningType == ScanningType.REGISTRATION) "Registration" else "Transaction",
+            fingerprintVerificationStatus = readerStatus == ReaderStatus.FINGERS_VERIFICATION_SUCCESS,
+            1,
+            localFileRefs,
+            uploadedFileRefs,
+            fingerPrintSyncedOnCloud = false,
+            0,
+            Date(),
+            arrayListOf()
+        )
+        db.collection("users").document(scanningOptions?.bvnNumber!!).set(user)
+            .addOnSuccessListener {
+                Log.d(ScannerActivity::class.simpleName, "Success")
+            }
+            .addOnFailureListener {
+                Log.e(ScannerActivity::class.simpleName, "Failed - ${it.message}")
+                it.printStackTrace()
+            }
+    }
+
+    private fun updateUserInDb(bvnNumber: String, map: HashMap<String, Any>) {
+        db.collection("users").document(bvnNumber).update(map)
+            .addOnSuccessListener {
+                Log.d(ScannerActivity::class.simpleName, "User update success")
+            }
+            .addOnFailureListener {
+                Log.e(ScannerActivity::class.simpleName, "User update failed ${it.message}")
+            }
+    }
+
+    private fun getUser(bvnNumber: String, callback: (Boolean) -> Unit) {
+        db.collection("users").document(bvnNumber).get().addOnSuccessListener {
+            Log.d(ScannerActivity::class.simpleName, "User in db - $it")
+            val user = it.toObject(User::class.java)
+            callback(user != null)
+            Log.d(ScannerActivity::class.simpleName, user?.amount.toString())
+        }.addOnFailureListener {
+            callback(false)
+            it.printStackTrace()
+            Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
+        }
+    }
+
+    private fun uploadFileFromLocalToFirebaseStorage(bvnNumber: String, uri: Uri) {
+        val fileRef = storageRef.child("${bvnNumber}/${uri.lastPathSegment}")
+        val uploadTask = fileRef.putFile(uri)
+        uploadTask.addOnProgressListener {
+            val progress = (100.0 * it.bytesTransferred) / it.totalByteCount
+            Log.d(ScannerActivity::class.simpleName, "Upload is $progress% done")
+        }.addOnSuccessListener {
+            Log.d(ScannerActivity::class.simpleName, "File upload success")
+            uploadedFileRefs.add(fileRef.path)
+            if (uploadedFileRefs.size == 2) {
+                uploadedFileRefs.clear()
+                updateUserInDb(
+                    bvnNumber,
+                    hashMapOf(
+                        "fingerPrintSyncedOnCloud" to true,
+                        "fingerPrintCloudPath" to uploadedFileRefs
+                    )
+                )
+            }
+            Log.d(
+                ScannerActivity::class.simpleName,
+                "uploadedFileRefs size -> ${uploadedFileRefs.size}"
+            )
+        }.addOnFailureListener {
+            Log.e(ScannerActivity::class.simpleName, "File upload failed")
+        }
+    }
+
+    private fun downloadFilesFromFirebaseStorage(callback: (Boolean) -> Unit) {
+        val storageList = ArrayList<StorageReference>()
+        val storageListRef = storageRef.child("${scanningOptions?.bvnNumber!!}/").listAll()
+        storageListRef.addOnSuccessListener {
+            if (it.items.isNotEmpty()) {
+                it.items.forEach { reference ->
+                    storageList.add(reference)
+                }
+                storageList.save(callback)
+            } else {
+                Toast.makeText(
+                    this,
+                    "No files found over local and server database",
+                    Toast.LENGTH_SHORT
+                ).show()
+                callback(false)
+            }
+
+            Log.d(
+                ScannerActivity::class.simpleName,
+                "Files over storage size - ${it.items.size}"
+            )
+            Log.d(ScannerActivity::class.simpleName, "Files over storage - ${it.items}")
+        }.addOnFailureListener {
+            callback(false)
+            it.printStackTrace()
+            Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
+            Toast.makeText(this, "Not able to fetch files", Toast.LENGTH_SHORT).show()
+        }
+
+    }
+
+    private fun ArrayList<StorageReference>.save(callback: (Boolean) -> Unit) {
+        val tempFileList = ArrayList<File>()
+        forEachIndexed { index, storageReference ->
+            val gsReference = storage.getReferenceFromUrl(
+                storageReference.toString(),
+            )
+            val dirPath = filesDir.path + "/${scanningOptions?.bvnNumber!!}/"
+            val filePath = dirPath + createFileName() + index + "-ISO-Template.bin"
+            val files = File(dirPath)
+            files.mkdirs()
+            gsReference.getFile(File(filePath)).addOnSuccessListener {
+                Log.d(
+                    ScannerActivity::class.simpleName,
+                    "Files downloaded to local storage - ${files.path}"
+                )
+                tempFileList.add(File(filePath))
+                if (tempFileList.size == this.size) {
+                    callback(true)
+                }
+            }.addOnProgressListener {
+                val progress = (100.0 * it.bytesTransferred) / it.totalByteCount
+                Log.d(ScannerActivity::class.simpleName, "Download progress $progress% done")
+            }.addOnFailureListener {
+                callback(false)
+                it.printStackTrace()
+                Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
+                Toast.makeText(
+                    this@ScannerActivity,
+                    "Not able to download files",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+
+    private fun createFileName(): String? {
+        val defaultFilePattern = "yyyy-MM-dd-HH-mm-ss"
+        val date = Date(System.currentTimeMillis())
+        val format = SimpleDateFormat(defaultFilePattern, Locale.ENGLISH)
+        return format.format(date)
+    }
+
+    private fun checkUserHasFilesInLocalStorage(): Boolean {
+        val dirPath = filesDir.path + "/${scanningOptions?.bvnNumber!!}/"
+        val files = File(dirPath)
+        return (files.isDirectory && !files.listFiles().isNullOrEmpty())
+    }
+
+    /*#region upload files which are not uploaded*/
+
+    private fun getUser() {
+        val source = Source.CACHE
+        val userDocuments = ArrayList<DocumentSnapshot>()
+        db.collection("users").whereEqualTo("fingerPrintSyncedOnCloud", false).get(source)
+            .addOnSuccessListener {
+                userDocuments.addAll(it.documents)
+                userDocuments.uploadFiles()
+            }.addOnFailureListener {
+                it.printStackTrace()
+                Log.e(ScannerApp::class.simpleName, "User fetch failed ${it.message}")
+            }
+    }
+
+    private fun ArrayList<DocumentSnapshot>.uploadFiles() {
+        forEachIndexed { _, userSnapshot ->
+            val user = userSnapshot.toObject(User::class.java)
+            Log.d(ScannerApp::class.simpleName, "User in db - $user")
+            user?.apply {
+                if (localFileRefs.isNotEmpty()) {
+                    localFileRefs.forEach {
+                        uploadFileFromLocalToFirebaseStorage(bvnNumber!!, Uri.fromFile(File(it)))
+                    }
+                } else {
+                    val dirPath = filesDir.path + "/${bvnNumber}/"
+                    val files = File(dirPath)
+                    if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+                        files.listFiles()?.forEach {
+                            uploadFileFromLocalToFirebaseStorage(bvnNumber!!, Uri.fromFile(it))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun saveTransactionToDb() {
+        val transaction = Transaction(
+            scanningOptions?.amount,
+            Date(),
+            scanningOptions?.bvnNumber ?: "",
+        )
+        db.collection("transaction")/*.document(scanningOptions?.bvnNumber!!).collection("${Date()}")*/
+            .document().set(transaction)
+            .addOnSuccessListener {
+                Log.d(ScannerActivity::class.simpleName, "Success")
+            }
+            .addOnFailureListener {
+                Log.e(ScannerActivity::class.simpleName, "Failed - ${it.message}")
+                it.printStackTrace()
+            }
+    }
+
+    /*#endregion*/
 }
 
 

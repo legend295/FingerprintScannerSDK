@@ -1,25 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin"
         android:background="@drawable/bg_round_white"
-        android:padding="@dimen/padding">
+        android:paddingStart="@dimen/padding"
+        android:paddingTop="@dimen/padding"
+        android:paddingEnd="@dimen/padding"
+        android:paddingBottom="20dp">
+
+        <androidx.appcompat.widget.AppCompatImageView
+            android:id="@+id/ivClose"
+            android:layout_width="35dp"
+            android:layout_height="35dp"
+            android:padding="10dp"
+            android:src="@drawable/ic_close"
+            android:visibility="gone"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
 
         <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/tvTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:paddingStart="30dp"
+            android:paddingEnd="30dp"
             android:text="@string/initialising_fingerprints"
             android:textColor="@color/black"
             android:textSize="@dimen/header"
             android:textStyle="bold"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
+            app:layout_constraintTop_toBottomOf="@id/ivClose" />
 
         <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/tvMessage"
@@ -36,20 +52,32 @@
 
         <androidx.appcompat.widget.AppCompatImageView
             android:id="@+id/ivFingerprint"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="60dp"
+            android:layout_height="60dp"
             android:layout_marginTop="@dimen/margin"
             android:src="@drawable/ic_android_fingerprint_infra_red"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/tvMessage" />
 
+        <androidx.appcompat.widget.AppCompatImageView
+            android:id="@+id/ivStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="-10dp"
+            android:layout_marginBottom="-10dp"
+            android:src="@drawable/ic_success"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/ivFingerprint"
+            app:layout_constraintEnd_toEndOf="@id/ivFingerprint"
+            tools:visibility="visible" />
+
         <ProgressBar
-            android:id="@+id/tvStatus"
+            android:id="@+id/progressBar"
             android:layout_width="30dp"
             android:layout_height="50dp"
-            android:text="@string/initializing"
             android:indeterminateTint="#818181"
+            android:text="@string/initializing"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/ivFingerprint" />

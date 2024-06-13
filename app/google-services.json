@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "323597086930",
+    "project_id": "scansdk-f1fc1",
+    "storage_bucket": "scansdk-f1fc1.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:323597086930:android:7a0be3c4c6aa9adcf7fd0b",
+        "android_client_info": {
+          "package_name": "com.fingerprintscanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBu0cocXTsn1swmwiE92yi9DBKI94MQ3ZE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

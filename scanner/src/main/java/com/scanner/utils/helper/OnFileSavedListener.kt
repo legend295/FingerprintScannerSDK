@@ -5,4 +5,6 @@ internal interface OnFileSavedListener {
     fun onBitmapSaveSuccess(path: String, readerNo: Int)
 
     fun onFailure(e: Exception)
+
+    fun onTemplateSaveSuccess(path: String, readerNo: Int)
 }
