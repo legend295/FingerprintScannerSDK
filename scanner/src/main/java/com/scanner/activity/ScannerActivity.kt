@@ -304,7 +304,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 /* if (scanningOptions?.scanningType == ScanningType.REGISTRATION)
                      setMessage("Please put your both fingers on sensor.") // Prompt the user to scan their fingerprints.
                  else setMessage("Please put your both fingers on sensor for verification.")*/
-                setMessage("Please wait for sensor initialization")
+                setMessage("Initializing sensor, please wait...")
                 handleCancelButtonsVisibility(isVisible = true) // Make the cancel buttons visible.
                 setStartButtonMessage(
                     "",
@@ -828,7 +828,7 @@ internal class ScannerActivity : AppCompatActivity() {
             if (status == NBBiometricsStatus.BAD_QUALITY) {
                 list.clear()
                 readerStatus = ReaderStatus.LOW_FINGERS_QUALITY
-                setMessage("Scanned fingers quality is bad. Please scan again")
+                setMessage("Poor scan quality. Please try again.")
                 handleCancelButtonsVisibility(isVisible = false)
                 setStartButtonMessage("Scan again", isVisible = true)
             }
@@ -848,7 +848,7 @@ internal class ScannerActivity : AppCompatActivity() {
                                 setFingerprintScanningResult(false)
                             }
                     }
-                    setMessage("Match not found.")
+                    setMessage("No match found.")
                 } else {
                     runOnUiThread {
                         if (verificationDialog == null)
@@ -869,7 +869,7 @@ internal class ScannerActivity : AppCompatActivity() {
                             setFingerprintScanningResult(result = true)
                         }
                 }
-                setMessage("Fingerprint verification success")
+                setMessage("Fingerprint verified successfully.")
                 saveTransactionToDb()
             }
         }
@@ -906,7 +906,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 } else {
                     if (previewListenerType == PreviewListenerType.EXTRACTION) {
                         readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
-                        setMessage("Finger read success. Verification in progress.")
+                        setMessage("Finger read successful. Verifying..")
                     } else {
                         readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
                         setStartButtonMessage("Done", true)
@@ -918,19 +918,19 @@ internal class ScannerActivity : AppCompatActivity() {
             }
 
             NBDeviceScanStatus.LIFT_FINGER -> {
-                setMessage("Please lift fingers")
+                setMessage("Please lift your fingers")
             }
 
             NBDeviceScanStatus.WAIT_FOR_SENSOR_INITIALIZATION -> {
-                setMessage("Please wait for sensor initialization")
+                setMessage("Initializing sensor, please wait...")
             }
 
             NBDeviceScanStatus.PUT_FINGER_ON_SENSOR -> {
-                setMessage("Please put you finger on Sensor.")
+                setMessage("Place your fingers on the sensor.")
             }
 
             NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR -> {
-                setMessage("Please keep finger on sensor")
+                setMessage("Please keep your fingers on the sensor")
             }
 
             NBDeviceScanStatus.WAIT_FOR_DATA_PROCESSING -> {
@@ -951,17 +951,19 @@ internal class ScannerActivity : AppCompatActivity() {
     private fun showMessage(message: String?, isErrorMessage: Boolean) {
         runOnUiThread {
             if (message.equals("ERROR: Invalid operation", ignoreCase = true)) {
-                val msg = "Device is in low power mode.Touch the sensor to wakeup the device."
+                val msg = "Device is in sleep mode. Please touch the finger sensor to wake it up."
                 setMessage(msg)
                 this@ScannerActivity.readerStatus = ReaderStatus.SERVICE_BOUND
                 runOnUiThread {
                     handleCancelButtonsVisibility(isVisible = false)
-                    setStartButtonMessage("Scan", true)
                     getDialog()?.dismiss()
                 }
 //                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-//                scope?.cancel()
-//                scope = fingerprintHelper?.waitFingerDetect()
+                scope?.cancel()
+                scope = fingerprintHelper?.waitFingerDetect {
+                    setMessage(getString(R.string.scan))
+                    setStartButtonMessage("Scan", isVisible = true)
+                }
             } else {
                 if (isErrorMessage) {
                     message?.let { Log.e("MainActivity", it) }

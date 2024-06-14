@@ -40,7 +40,7 @@ internal class FingerprintHelper(
 
     private var timeout = 0
     private val defaultTimeout = 0
-    private var level = 100
+    private var level = 1
     private val defaultLevel = 100
     private var compression = 1.0
     private val defaultCompression = 1.0
@@ -408,11 +408,11 @@ internal class FingerprintHelper(
         }
     }
 
-    fun waitFingerDetect(): CoroutineScope {
+    fun waitFingerDetect(callback: (Boolean) -> Unit): CoroutineScope {
         val scope = CoroutineScope(Dispatchers.IO)
         scope.launch {
             if (waitFingersDetect(level, timeout)) {
-                scanAndExtract()
+                callback(true)
             }
         }
         return scope

@@ -6,7 +6,7 @@
     <string name="fingers_detected">Fingers detected. Please remove fingers.</string>
     <string name="scan">Please Start Scanning</string>
     <string name="read_success_scan_again">Finger Read Success, Scan again.</string>
-    <string name="read_success">Finger Read Success. Please remove fingers.</string>
+    <string name="read_success">Finger read successful. Please remove your fingers.</string>
     <string name="scan_fingerprints">Scan Fingerprints</string>
     <string name="please_place_your_chosen_fingers_on_the_scanner_above">Please place your chosen fingers on the\nscanner above.</string>
     <string name="initialising_fingerprints">Initialising Fingerprints</string>

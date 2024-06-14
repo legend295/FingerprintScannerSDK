@@ -1,21 +1,17 @@
 package com.fingerprintscanner
 
-import android.content.Intent
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatTextView
 import com.fingerprintscanner.utility.showFieldsDialog
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.firebase.firestore.ktx.firestore
-import com.google.firebase.ktx.Firebase
 import com.scanner.activity.FingerprintScanner
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.ScanningType
 import java.io.File
-import java.lang.StringBuilder
 
 class MainActivity : AppCompatActivity() {
     private var tvStatus: AppCompatTextView? = null
