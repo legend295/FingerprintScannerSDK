@@ -3,6 +3,7 @@ package com.scanner.utils
 import android.app.Dialog
 import android.content.Context
 import android.os.Looper
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.ProgressBar
@@ -30,6 +31,7 @@ internal fun Context.readersInitializationDialog(): Dialog {
 }
 
 internal fun Context.verificationDialog(isSuccess: Boolean, callback: () -> Unit): Dialog {
+    Log.d(this::class.simpleName,"showing:: verificationDialog")
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
     with(layout) {

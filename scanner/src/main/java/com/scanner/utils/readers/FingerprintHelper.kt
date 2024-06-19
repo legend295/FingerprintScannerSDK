@@ -18,6 +18,7 @@ import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -357,9 +358,9 @@ internal class FingerprintHelper(
     }
 
     fun stop() {
+        run = false
+        started = false
         /*  Log.d("WaxdPosLib", "FingerprintService::Stop")
-          run = false
-          started = false
           close()*/
     }
 
@@ -418,6 +419,10 @@ internal class FingerprintHelper(
         return scope
     }
 
+    fun stopFingerprintDetect() {
+        run = false
+    }
+
     fun isSessionOpen() {
         if (!init) return
         val isFirstOpen: Boolean
@@ -471,7 +476,7 @@ internal class FingerprintHelper(
                     return false
                 }
                 try {
-                    Thread.sleep(1000)
+                    Thread.sleep(2000)
                 } catch (e: InterruptedException) {
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Interrupted")
                     run = false
