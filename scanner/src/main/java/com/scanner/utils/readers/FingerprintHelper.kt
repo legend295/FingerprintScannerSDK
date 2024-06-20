@@ -412,11 +412,62 @@ internal class FingerprintHelper(
     fun waitFingerDetect(callback: (Boolean) -> Unit): CoroutineScope {
         val scope = CoroutineScope(Dispatchers.IO)
         scope.launch {
-            if (waitFingersDetect(level, timeout)) {
-                callback(true)
-            }
+            waitFingersDetectForLoop(level, timeout, callback)
         }
         return scope
+    }
+
+    private fun waitFingersDetectForLoop(
+        level: Int,
+        timeout: Int,
+        callback: (Boolean) -> Unit
+    ): Boolean {
+        Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect")
+        cancelled = false
+        return try {
+            run = true
+            val s = System.currentTimeMillis()
+            for (i in 0..3) {
+                if (!reader[0]!!.isSessionOpen()) {
+                    run = false
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerPrintService::WaitFingersDetect -> Reader session is closed."
+                    )
+                    callback(false)
+                    return false
+                }
+                if (reader[0]?.detectFinger(level) == true && reader[1]?.detectFinger(level) == true) {
+                    Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Finger Detected")
+                    run = false
+                    callback(true)
+                    return true
+                }
+                if (timeout > 0 && System.currentTimeMillis() - s > timeout * 1000) {
+                    Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> timeout")
+                    run = false
+                    callback(false)
+                    return false
+                }
+                try {
+                    Thread.sleep(2000)
+                } catch (e: InterruptedException) {
+                    Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Interrupted")
+                    run = false
+                    callback(false)
+                    return false
+                }
+                Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Still waiting ... ")
+            }
+            run = false
+            callback(false)
+            Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Done")
+            false
+        } catch (e: java.lang.Exception) {
+            Log.e("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Exception: " + e.message)
+            callback(false)
+            false
+        }
     }
 
     fun stopFingerprintDetect() {

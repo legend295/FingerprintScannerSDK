@@ -17,5 +17,5 @@ internal data class User(
     var fingerPrintSyncedOnCloud: Boolean? = null,
     var amount: Int? = null,
     var timestamp: Date? = null,
-    var gpsCoordinates: ArrayList<Double>? = null,
+    var gpsCoordinates: ArrayList<Double?>? = null,
 )

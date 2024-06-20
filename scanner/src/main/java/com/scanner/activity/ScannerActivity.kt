@@ -1,6 +1,8 @@
 package com.scanner.activity
 
 import android.Manifest
+import android.Manifest.permission.ACCESS_COARSE_LOCATION
+import android.Manifest.permission.ACCESS_FINE_LOCATION
 import android.app.Dialog
 import android.content.Context
 import android.content.Intent
@@ -25,6 +27,7 @@ import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.github.legend295.fingerprintscanner.R
+import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.ktx.firestore
@@ -49,6 +52,7 @@ import com.scanner.utils.enums.ScanningType
 import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
 import com.scanner.utils.helper.ReaderSessionHelper
+import com.scanner.utils.location.LocationWrapper
 import com.scanner.utils.readers.FingerprintHelper
 import com.scanner.utils.readersInitializationDialog
 import com.scanner.utils.templatesDownloadDialog
@@ -105,6 +109,12 @@ internal class ScannerActivity : AppCompatActivity() {
     private var verificationDialog: Dialog? = null
 
     private val identificationResult = HashMap<Int, NBBiometricsIdentifyResult?>()
+    private val locationWrapper: LocationWrapper = LocationWrapper(this)
+
+    companion object {
+        var location: LatLng? = null
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scanner)
@@ -112,6 +122,13 @@ internal class ScannerActivity : AppCompatActivity() {
         list = ArrayList()
         identificationResult.clear()
         verificationDialog = null
+        if (checkPermissions()) {
+            locationWrapper.getLocation {
+                Log.d(tag, "${location?.latitude}, ${location?.longitude}")
+            }
+        } else {
+            requestPermissionLauncher.launch(arrayOf(ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION))
+        }
         getUser() //65112583554
 
         //Find views by id
@@ -670,6 +687,31 @@ internal class ScannerActivity : AppCompatActivity() {
             }
         }
 
+    private fun checkPermissions(): Boolean {
+        return ActivityCompat.checkSelfPermission(
+            this,
+            ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(
+                    this,
+                    ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+            val list = ArrayList<Boolean>()
+            permissions.forEach { actionMap ->
+                if (actionMap.value) list.add(actionMap.value)
+            }
+
+            if (list.size == 2) {
+                locationWrapper.getLocation {
+                    Log.d(tag, "${location?.latitude}, ${location?.longitude}")
+                }
+            }
+        }
+
     /**
      * Displays a dialog informing the user that storage and camera permissions are essential.
      *
@@ -1052,7 +1094,7 @@ internal class ScannerActivity : AppCompatActivity() {
             fingerPrintSyncedOnCloud = false,
             0,
             Date(),
-            arrayListOf()
+            arrayListOf(location?.latitude, location?.longitude)
         )
         db.collection("users").document(scanningOptions?.bvnNumber!!).set(user)
             .addOnSuccessListener {
@@ -1238,14 +1280,15 @@ internal class ScannerActivity : AppCompatActivity() {
             scanningOptions?.amount,
             Date(),
             scanningOptions?.bvnNumber ?: "",
+            arrayListOf(location?.latitude, location?.longitude)
         )
         db.collection("transaction")/*.document(scanningOptions?.bvnNumber!!).collection("${Date()}")*/
             .document().set(transaction)
             .addOnSuccessListener {
-                Log.d(ScannerActivity::class.simpleName, "Success")
+                Log.d(ScannerActivity::class.simpleName, "Transaction save Success")
             }
             .addOnFailureListener {
-                Log.e(ScannerActivity::class.simpleName, "Failed - ${it.message}")
+                Log.e(ScannerActivity::class.simpleName, "Transaction save Failed - ${it.message}")
                 it.printStackTrace()
             }
     }

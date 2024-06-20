@@ -991,23 +991,23 @@ internal class FingerprintReader(
                     timeStart = timeStop
                     quality = 0
                     success = false
-                    try {
-                        timeStart = System.currentTimeMillis()
-                        //Hide Menu before scan and extract starts.
-                        isScanAndExtractInProgress = true
+//                    try {
+                    timeStart = System.currentTimeMillis()
+                    //Hide Menu before scan and extract starts.
+                    isScanAndExtractInProgress = true
 //                    if (isSpoofEnabled) enableSpoof()
-                        //Enable Image preview for FAP20
-                        //device.setParameter(410,1);
-                        extractResult = context.extract(
-                            NBBiometricsTemplateType.ISO,
-                            NBBiometricsFingerPosition.UNKNOWN,
-                            scanFormatInfo,
-                            previewListener
-                        )
-                        timeStop = System.currentTimeMillis()
-                    } catch (ex: Exception) {
-                        ex.printStackTrace()
-                    }
+                    //Enable Image preview for FAP20
+                    //device.setParameter(410,1);
+                    extractResult = context.extract(
+                        NBBiometricsTemplateType.ISO,
+                        NBBiometricsFingerPosition.UNKNOWN,
+                        scanFormatInfo,
+                        previewListener
+                    )
+                    timeStop = System.currentTimeMillis()
+//                    } catch (ex: Exception) {
+//                        ex.printStackTrace()
+//                    }
                     if (extractResult?.status != NBBiometricsStatus.OK) {
                         fingerprintListener.extractionResult(extractResult?.status, readerNo)
                         return false
