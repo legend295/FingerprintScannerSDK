@@ -1,6 +1,7 @@
 package com.scanner.app
 
 import android.app.Application
+import com.scanner.utils.KeyStore
 import com.scanner.utils.readers.FingerprintHelper
 
 internal class ScannerApp : Application() {

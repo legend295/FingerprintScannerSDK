@@ -26,6 +26,8 @@ import com.nextbiometrics.devices.NBDeviceScanResult
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.system.NextBiometricsException
+import com.scanner.utils.KeyStore.decryptData
+import com.scanner.utils.KeyStore.encryptData
 import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
 import com.scanner.utils.helper.FingerprintListener
@@ -725,7 +727,6 @@ internal class FingerprintReader(
         }
     }
 
-    @Throws(IOException::class)
     private fun readAllBytes(fileName: String): ByteArray? {
         var ous: ByteArrayOutputStream? = null
         var ios: InputStream? = null
@@ -741,14 +742,15 @@ internal class FingerprintReader(
             ous?.close()
             ios?.close()
         }
-        return ous!!.toByteArray()
+        return ous?.toByteArray()
     }
 
     @Throws(IOException::class)
     private fun loadTemplate(
         fileName: String,
-        templateType: NBBiometricsTemplateType = NBBiometricsTemplateType.ISO
-    ): NBBiometricsTemplate? {
+        templateType: NBBiometricsTemplateType = NBBiometricsTemplateType.ISO,
+        callback: (NBBiometricsTemplate?) -> Unit
+    ) {
         try {
             val context = NBBiometricsContext(reader)
             println(
@@ -758,12 +760,18 @@ internal class FingerprintReader(
                     templateType.toString()
                 )
             )
-            val template = context.loadTemplate(templateType, readAllBytes(fileName))
-            println("Template loaded successfully.")
-            return template
+            this.context.decryptData(fileName) {
+                it?.let { array ->
+                    Log.d(FingerprintReader::class.simpleName, "byte array size - ${array.size}")
+//            val template = context.loadTemplate(templateType, readAllBytes(fileName))
+                    val template = context.loadTemplate(templateType, array)
+                    println("Template loaded successfully.")
+                    callback(template)
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
-            return null
+            callback(null)
         }
 
     }
@@ -1123,7 +1131,9 @@ internal class FingerprintReader(
                         "FingerprintReader[$readerNo]::identifyFingers -> Files found in directory - ${fileLists?.size}"
                     )
                     fileLists?.forEach {
-                        loadTemplate(it.path)?.let { template -> listOfTemplate.add(template) }
+                        loadTemplate(it.path) { template ->
+                            template?.let { it1 -> listOfTemplate.add(it1) }
+                        }
                         Thread.sleep(300)
                     }
                     if (listOfTemplate.isEmpty()) {
@@ -1221,27 +1231,29 @@ internal class FingerprintReader(
             !files.exists()
         ) {
             val binaryTemplate = context.saveTemplate(this)
-            showMessage(
-                String.format(
-                    "Extracted template length: %d bytes",
-                    binaryTemplate.size
+            this@FingerprintReader.context.encryptData(binaryTemplate) {
+                showMessage(
+                    String.format(
+                        "Extracted template length: %d bytes",
+                        it.size
+                    )
                 )
-            )
-            val base64Template = Base64.encodeToString(binaryTemplate, 0)
-            showMessage("Extracted template: $base64Template")
+                val base64Template = Base64.encodeToString(binaryTemplate, 0)
+                showMessage("Extracted template: $base64Template")
 
-            // Store template to file
+                // Store template to file
 //                val dirPath = this.context.filesDir.path + "/NBCapturedImages/"
-            files.mkdirs()
+                files.mkdirs()
 
-            val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.bin"
-            showMessage("Saving ISO template to $filePath")
-            val fos = FileOutputStream(filePath)
-            fos.write(binaryTemplate)
-            fos.close()
+                val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.bin"
+                showMessage("Saving ISO template to $filePath")
+                val fos = FileOutputStream(filePath)
+                fos.write(it)
+                fos.close()
 
 
-            listener.onTemplateSaveSuccess(filePath, readerNo)
+                listener.onTemplateSaveSuccess(filePath, readerNo)
+            }
         }
     }
 

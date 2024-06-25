@@ -9,6 +9,9 @@ plugins {
 //    id 'com.github.dcendents.android-maven'
 }
 
+def localProperties = new Properties()
+localProperties.load(new FileInputStream(rootProject.file("local.properties")))
+
 android {
     namespace 'com.github.legend295.fingerprintscanner'
     compileSdk 34
@@ -23,6 +26,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+
+            buildConfigField 'String', 'KEY', localProperties['key']
+        }
+        debug {
+            buildConfigField 'String', 'KEY', localProperties['key']
         }
     }
     compileOptions {
@@ -41,6 +49,7 @@ android {
 
     /* android.buildFeatures.dataBinding = true
      android.buildFeatures.viewBinding = true*/
+    android.buildFeatures.buildConfig true
     buildFeatures {
         dataBinding = true
     }
