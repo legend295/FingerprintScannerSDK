@@ -31,7 +31,7 @@ internal fun Context.readersInitializationDialog(): Dialog {
 }
 
 internal fun Context.verificationDialog(isSuccess: Boolean, callback: () -> Unit): Dialog {
-    Log.d(this::class.simpleName,"showing:: verificationDialog")
+    Log.d(this::class.simpleName, "showing:: verificationDialog")
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
     with(layout) {
@@ -79,6 +79,41 @@ internal fun Context.templatesDownloadDialog(): Dialog {
 
     dialog.setContentView(layout)
     dialog.setCancelable(false)
+
+    return dialog
+}
+
+internal fun Context.transactionOutOfArea(callback: () -> Unit): Dialog {
+    val dialog = Dialog(this, R.style.DialogStyleInstagram)
+    val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+    with(layout) {
+        val title = findViewById<AppCompatTextView>(R.id.tvTitle)
+        val message = findViewById<AppCompatTextView>(R.id.tvMessage)
+        val ivClose = findViewById<AppCompatImageView>(R.id.ivClose)
+        val ivStatus = findViewById<AppCompatImageView>(R.id.ivStatus)
+        val ivFingerprint = findViewById<AppCompatImageView>(R.id.ivFingerprint)
+        val progressBar = findViewById<ProgressBar>(R.id.progressBar)
+        progressBar.visibility = View.GONE
+        ivClose.visibility = View.VISIBLE
+        ivStatus.visibility = View.GONE
+        message.visibility = View.VISIBLE
+        ivFingerprint.setImageDrawable(
+            ContextCompat.getDrawable(
+                this@transactionOutOfArea,
+                R.drawable.ic_map
+            )
+        )
+        title.text = "Transaction Failed"
+        message.text = "The transaction is out of the\nauthorized area."
+        ivClose.setOnClickListener {
+            dialog.dismiss()
+            callback()
+        }
+    }
+
+    dialog.setContentView(layout)
+    dialog.setCancelable(false)
+    dialog.show()
 
     return dialog
 }

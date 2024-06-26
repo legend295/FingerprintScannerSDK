@@ -35,6 +35,7 @@ import com.google.firebase.ktx.Firebase
 import com.google.firebase.storage.StorageReference
 import com.google.firebase.storage.ktx.storage
 import com.google.gson.Gson
+import com.google.maps.android.SphericalUtil
 import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -56,6 +57,7 @@ import com.scanner.utils.location.LocationWrapper
 import com.scanner.utils.readers.FingerprintHelper
 import com.scanner.utils.readersInitializationDialog
 import com.scanner.utils.templatesDownloadDialog
+import com.scanner.utils.transactionOutOfArea
 import com.scanner.utils.verificationDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -122,6 +124,7 @@ internal class ScannerActivity : AppCompatActivity() {
         list = ArrayList()
         identificationResult.clear()
         verificationDialog = null
+
         if (checkPermissions()) {
             locationWrapper.getLocation {
                 Log.d(tag, "${location?.latitude}, ${location?.longitude}")
@@ -163,19 +166,20 @@ internal class ScannerActivity : AppCompatActivity() {
         fingerprintHelper?.setListOfTemplate(listOfTemplate = listOfTemplate)
         fingerprintHelper?.setOnFileSaveListener(listener = onFileSavedListener(list))
 
-
         val bundle = intent.extras
         val options = bundle?.getString(Constant.SCANNING_OPTIONS)
         scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
         scanningOptions?.bvnNumber?.let { fingerprintHelper?.setBvnNumber(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.bvnNumber?.let {
-            getUser(it) { userFound ->
+            getUser(it) { userFound, _ ->
                 if (!userFound) {
                     saveUserToDb()
                 }
             }
         }
+
+
 
         // Initialize Fingerprint readers on background thread on main thread UI will stuck
         init()
@@ -201,28 +205,65 @@ internal class ScannerActivity : AppCompatActivity() {
         if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
             initialize()
         } else {
-            if (checkUserHasFilesInLocalStorage()) {
-                initialize()
-            } else {
-                showFingerprintDownloadDialog()
-                scanningOptions?.bvnNumber?.let {
-                    getUser(it) { userFound ->
-                        if (userFound) {
-                            downloadFilesFromFirebaseStorage { isSuccess ->
-                                hideFingerprintDownloadDialog()
-                                if (isSuccess) {
-                                    initialize()
-                                } else finish()
+            scanningOptions?.bvnNumber?.let { bvnNumber ->
+                getUser(bvnNumber) { userFound, user ->
+                    if (userFound) {
+                        user?.let {
+                            // When there are no gps co-ordinates over firebase then show toast and finish
+                            if (user.gpsCoordinates.isNullOrEmpty()) {
+                                handleMessageAndFinish("User's co-ordinates not found.")
+                            } else {
+                                // Get user's co-ordinates and create LatLng to check distance
+                                val latLng = LatLng(
+                                    user.gpsCoordinates?.get(0) ?: 0.0,
+                                    user.gpsCoordinates?.get(1) ?: 0.0
+                                )
+
+                                // Calculate distance
+                                val distanceInMeter =
+                                    SphericalUtil.computeDistanceBetween(location, latLng)
+
+                                // Check distance
+                                if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
+                                    transactionOutOfArea {
+                                        finish()
+                                    }
+                                } else {
+                                    handleInitialization()
+
+                                }
                             }
-                        } else {
-                            hideFingerprintDownloadDialog()
-                            Toast.makeText(this, "User not found.", Toast.LENGTH_SHORT).show()
-                            finish()
                         }
+                    } else {
+                        hideFingerprintDownloadDialog()
+                        handleMessageAndFinish("User not found.")
                     }
                 }
             }
         }
+    }
+
+    private fun handleInitialization() {
+        if (checkUserHasFilesInLocalStorage()) {
+            initialize()
+        } else {
+            showFingerprintDownloadDialog()
+            downloadFilesFromFirebaseStorage { isSuccess ->
+                hideFingerprintDownloadDialog()
+                if (isSuccess) {
+                    initialize()
+                } else finish()
+            }
+        }
+    }
+
+    private fun handleMessageAndFinish(msg: String) {
+        Toast.makeText(
+            this,
+            msg,
+            Toast.LENGTH_SHORT
+        ).show()
+        finish()
     }
 
     /**
@@ -1116,14 +1157,14 @@ internal class ScannerActivity : AppCompatActivity() {
             }
     }
 
-    private fun getUser(bvnNumber: String, callback: (Boolean) -> Unit) {
+    private fun getUser(bvnNumber: String, callback: (Boolean, User?) -> Unit) {
         db.collection("users").document(bvnNumber).get().addOnSuccessListener {
             Log.d(ScannerActivity::class.simpleName, "User in db - $it")
             val user = it.toObject(User::class.java)
-            callback(user != null)
+            callback(user != null, user)
             Log.d(ScannerActivity::class.simpleName, user?.amount.toString())
         }.addOnFailureListener {
-            callback(false)
+            callback(false, null)
             it.printStackTrace()
             Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
         }
