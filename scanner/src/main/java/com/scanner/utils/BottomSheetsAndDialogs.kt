@@ -117,3 +117,63 @@ internal fun Context.transactionOutOfArea(callback: () -> Unit): Dialog {
 
     return dialog
 }
+
+internal fun Context.fetchingLocationDialog(callback: () -> Unit): Dialog {
+    val dialog = Dialog(this, R.style.DialogStyleInstagram)
+    val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+    with(layout) {
+        val title = findViewById<AppCompatTextView>(R.id.tvTitle)
+        val message = findViewById<AppCompatTextView>(R.id.tvMessage)
+        val ivClose = findViewById<AppCompatImageView>(R.id.ivClose)
+        val ivStatus = findViewById<AppCompatImageView>(R.id.ivStatus)
+        val ivFingerprint = findViewById<AppCompatImageView>(R.id.ivFingerprint)
+        val progressBar = findViewById<ProgressBar>(R.id.progressBar)
+        progressBar.visibility = View.VISIBLE
+        ivClose.visibility = View.GONE
+        ivStatus.visibility = View.GONE
+        message.visibility = View.VISIBLE
+        ivFingerprint.visibility = View.GONE
+        title.text = "Fetching Location..."
+        message.text = "Please wait while we are\nfetching current location."
+        ivClose.setOnClickListener {
+           /* dialog.dismiss()
+            callback()*/
+        }
+    }
+
+    dialog.setContentView(layout)
+    dialog.setCancelable(false)
+    dialog.show()
+
+    return dialog
+}
+
+internal fun Context.fetchingUserDB(callback: () -> Unit): Dialog {
+    val dialog = Dialog(this, R.style.DialogStyleInstagram)
+    val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+    with(layout) {
+        val title = findViewById<AppCompatTextView>(R.id.tvTitle)
+        val message = findViewById<AppCompatTextView>(R.id.tvMessage)
+        val ivClose = findViewById<AppCompatImageView>(R.id.ivClose)
+        val ivStatus = findViewById<AppCompatImageView>(R.id.ivStatus)
+        val ivFingerprint = findViewById<AppCompatImageView>(R.id.ivFingerprint)
+        val progressBar = findViewById<ProgressBar>(R.id.progressBar)
+        progressBar.visibility = View.VISIBLE
+        ivClose.visibility = View.GONE
+        ivStatus.visibility = View.GONE
+        message.visibility = View.VISIBLE
+        ivFingerprint.visibility = View.GONE
+        title.text = "Fetching User..."
+        message.text = "Please wait while we are\nfetching user."
+        ivClose.setOnClickListener {
+            /* dialog.dismiss()
+             callback()*/
+        }
+    }
+
+    dialog.setContentView(layout)
+    dialog.setCancelable(false)
+    dialog.show()
+
+    return dialog
+}

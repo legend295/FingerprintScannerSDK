@@ -4,6 +4,7 @@ import android.Manifest
 import android.Manifest.permission.ACCESS_COARSE_LOCATION
 import android.Manifest.permission.ACCESS_FINE_LOCATION
 import android.app.Dialog
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,13 +12,13 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -26,6 +27,7 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat.isLocationEnabled
 import com.github.legend295.fingerprintscanner.R
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.DocumentSnapshot
@@ -36,6 +38,8 @@ import com.google.firebase.storage.StorageReference
 import com.google.firebase.storage.ktx.storage
 import com.google.gson.Gson
 import com.google.maps.android.SphericalUtil
+import com.google.zxing.BarcodeActivity
+import com.google.zxing.pdf417.encoder.BarcodeMatrix
 import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -50,6 +54,8 @@ import com.scanner.utils.constants.Constant.FINGER_PRINT_READ_INFO
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
+import com.scanner.utils.fetchingLocationDialog
+import com.scanner.utils.fetchingUserDB
 import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
 import com.scanner.utils.helper.ReaderSessionHelper
@@ -112,6 +118,8 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private val identificationResult = HashMap<Int, NBBiometricsIdentifyResult?>()
     private val locationWrapper: LocationWrapper = LocationWrapper(this)
+    private var timer: CountDownTimer? = null
+    private var alertDialog: AlertDialog? = null
 
     companion object {
         var location: LatLng? = null
@@ -125,13 +133,7 @@ internal class ScannerActivity : AppCompatActivity() {
         identificationResult.clear()
         verificationDialog = null
 
-        if (checkPermissions()) {
-            locationWrapper.getLocation {
-                Log.d(tag, "${location?.latitude}, ${location?.longitude}")
-            }
-        } else {
-            requestPermissionLauncher.launch(arrayOf(ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION))
-        }
+
         getUser() //65112583554
 
         //Find views by id
@@ -171,18 +173,30 @@ internal class ScannerActivity : AppCompatActivity() {
         scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
         scanningOptions?.bvnNumber?.let { fingerprintHelper?.setBvnNumber(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
-        scanningOptions?.bvnNumber?.let {
-            getUser(it) { userFound, _ ->
-                if (!userFound) {
-                    saveUserToDb()
+
+        if (checkPermissions()) {
+            handleLocationEmpty()
+            /*if (locationWrapper.isLocationEnabled(this)) {
+                locationWrapper.getLocation {
+                    if (location == null)
+                        handleLocationEmpty()
+                    else {
+                        saveUserToDB()
+                    }
+                    Log.d(tag, "${location?.latitude}, ${location?.longitude}")
                 }
-            }
+                // Initialize Fingerprint readers on background thread on main thread UI will stuck
+                init()
+            } else handleMessage("Please enable location permissions in your settings. User registration requires location access.") {
+                // Initialize Fingerprint readers on background thread on main thread UI will stuck
+                init()
+            }*/
+        } else {
+            requestPermissionLauncher.launch(arrayOf(ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION))
         }
 
 
 
-        // Initialize Fingerprint readers on background thread on main thread UI will stuck
-        init()
 
         btnStart?.setOnClickListener {
             if (checkStorageAndCameraPermission()) {
@@ -201,17 +215,71 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
-    private fun init() {
-        if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
-            initialize()
+    private fun saveUserToDB() {
+        scanningOptions?.bvnNumber?.let {
+            getUser(it) { userFound, _ ->
+                if (!userFound) {
+                    saveUserToDb()
+                }
+            }
+        }
+    }
+
+    private fun handleLocationEmpty() {
+        if (locationWrapper.isLocationEnabled(this)) {
+            locationWrapper.getLocation {}
+            val dialog = fetchingLocationDialog {}
+            timer = object : CountDownTimer(10000, 1000) {
+                override fun onTick(millisUntilFinished: Long) {
+                    Log.d(tag, "$location")
+                    if (location != null) {
+                        cancel()
+                        dialog.dismiss()
+                        init()
+                    }
+                }
+
+                override fun onFinish() {
+                    dialog.dismiss()
+                    if (location == null)
+                        handleMessage("Unable to fetch current location. Please restart the application") {
+                            finish()
+                        }
+                    else {
+                        init()
+                    }
+                }
+            }.start()
         } else {
-            scanningOptions?.bvnNumber?.let { bvnNumber ->
-                getUser(bvnNumber) { userFound, user ->
+            handleMessage("Please enable location permissions in your settings. User registration requires location access.") {
+                handleLocationEmpty()
+            }
+        }
+    }
+
+    private fun init() {
+        scanningOptions?.bvnNumber?.let { bvnNumber ->
+            val dialog = fetchingUserDB {}
+            getUser(bvnNumber) { userFound, user ->
+                dialog.dismiss()
+                if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+                    if (userFound && user?.fingerPrintSyncedOnCloud == true) {
+                        handleMessageAndFinish("The user is already registered with entered BVN number. Please try with new BVN.")
+                    } else {
+                        saveUserToDB()
+                        initialize()
+                    }
+                } else {
                     if (userFound) {
                         user?.let {
                             // When there are no gps co-ordinates over firebase then show toast and finish
-                            if (user.gpsCoordinates.isNullOrEmpty()) {
+                            if (user.gpsCoordinates.isNullOrEmpty() || user.gpsCoordinates?.get(0) == null || user.gpsCoordinates?.get(
+                                    1
+                                ) == null
+                            ) {
                                 handleMessageAndFinish("User's co-ordinates not found.")
+                            } else if (location == null) {
+                                handleLocationEmpty()
                             } else {
                                 // Get user's co-ordinates and create LatLng to check distance
                                 val latLng = LatLng(
@@ -239,8 +307,10 @@ internal class ScannerActivity : AppCompatActivity() {
                         handleMessageAndFinish("User not found.")
                     }
                 }
+
             }
         }
+
     }
 
     private fun handleInitialization() {
@@ -258,12 +328,23 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun handleMessageAndFinish(msg: String) {
-        Toast.makeText(
-            this,
-            msg,
-            Toast.LENGTH_SHORT
-        ).show()
-        finish()
+        runOnUiThread {
+            AlertDialog.Builder(this).setMessage(msg).setPositiveButton("Ok") { dialog, _ ->
+                dialog.dismiss()
+                finish()
+            }.show()
+        }
+    }
+
+    private fun handleMessage(msg: String, callback: () -> Unit) {
+        runOnUiThread {
+            alertDialog?.dismiss()
+            alertDialog =
+                AlertDialog.Builder(this).setMessage(msg).setPositiveButton("Ok") { dialog, _ ->
+                    dialog.dismiss()
+                    callback()
+                }.show()
+        }
     }
 
     /**
@@ -387,10 +468,8 @@ internal class ScannerActivity : AppCompatActivity() {
             // Handles the successful read of fingerprints or if the fingers were released from the reader.
             ReaderStatus.FINGERS_READ_SUCCESS, ReaderStatus.FINGERS_RELEASED -> {
                 if (list.isEmpty()) { // Check if the data list is unexpectedly empty.
-                    runOnUiThread {
-                        Toast.makeText(this, "No data found.", Toast.LENGTH_SHORT)
-                            .show() // Inform the user no data was found.
-                    }
+                    // Inform the user no data was found.
+                    handleMessage("No data found.") {}
                     return
                 }
                 val intent = Intent()
@@ -458,10 +537,17 @@ internal class ScannerActivity : AppCompatActivity() {
                 ReaderStatus.SERVICE_BOUND -> {
                     //Start scanning process readers are initialized
                     setMessage(getString(R.string.scan))
-                    runOnUiThread {
-                        setStartButtonMessage("Scan", true)
-                        getDialog()?.dismiss()
-                    }
+                    if (location == null) {
+                        handleLocationEmpty()
+                        runOnUiThread {
+                            setStartButtonMessage("Start Scan", true)
+                            getDialog()?.dismiss()
+                        }
+                    } else
+                        runOnUiThread {
+                            setStartButtonMessage("Start Scan", true)
+                            getDialog()?.dismiss()
+                        }
                     if (fingerprintHelper?.start() == true) {
 //                    fingerprintHelper.scanAndExtract()
                         Log.d(tag, "START OK")
@@ -513,7 +599,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
                 ReaderStatus.SESSION_OPEN -> {
                     setMessage(getString(R.string.scan))
-                    setStartButtonMessage("Scan", true)
+                    setStartButtonMessage("Start Scan", true)
 
                     runOnUiThread {
                         getDialog()?.dismiss()
@@ -986,6 +1072,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     setStartButtonMessage("Done", true)
                     handleCancelButtonsVisibility(isVisible = false)
                     setMessage(getString(R.string.read_success))
+                    handleMessage("User successfully registered") {}
                 } else {
                     if (previewListenerType == PreviewListenerType.EXTRACTION) {
                         readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
@@ -1041,11 +1128,10 @@ internal class ScannerActivity : AppCompatActivity() {
                     handleCancelButtonsVisibility(isVisible = false)
                     getDialog()?.dismiss()
                 }
-//                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 scope?.cancel()
                 scope = fingerprintHelper?.waitFingerDetect {
                     setMessage(getString(R.string.scan))
-                    setStartButtonMessage("Scan", isVisible = true)
+                    setStartButtonMessage("Start Scan", isVisible = true)
                 }
             } else {
                 if (isErrorMessage) {
@@ -1208,12 +1294,9 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
                 storageList.save(callback)
             } else {
-                Toast.makeText(
-                    this,
-                    "No files found over local and server database",
-                    Toast.LENGTH_SHORT
-                ).show()
-                callback(false)
+                // THis will finish the activity so we don't need to send callback here
+                handleMessageAndFinish("No files found over local and server database")
+//                callback(false)
             }
 
             Log.d(
@@ -1222,10 +1305,11 @@ internal class ScannerActivity : AppCompatActivity() {
             )
             Log.d(ScannerActivity::class.simpleName, "Files over storage - ${it.items}")
         }.addOnFailureListener {
-            callback(false)
+//            callback(false)
             it.printStackTrace()
             Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
-            Toast.makeText(this, "Not able to fetch files", Toast.LENGTH_SHORT).show()
+            // THis will finish the activity so we don't need to send callback here
+            handleMessageAndFinish("Not able to fetch files")
         }
 
     }
@@ -1253,14 +1337,11 @@ internal class ScannerActivity : AppCompatActivity() {
                 val progress = (100.0 * it.bytesTransferred) / it.totalByteCount
                 Log.d(ScannerActivity::class.simpleName, "Download progress $progress% done")
             }.addOnFailureListener {
-                callback(false)
+//                callback(false)
                 it.printStackTrace()
                 Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
-                Toast.makeText(
-                    this@ScannerActivity,
-                    "Not able to download files",
-                    Toast.LENGTH_SHORT
-                ).show()
+                handleMessageAndFinish("Not able to download files")
+
             }
         }
     }
@@ -1335,6 +1416,12 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     /*#endregion*/
+    /*
+        internal class BroadCastReceiverGPS : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+
+            }
+        }*/
 }
 
 

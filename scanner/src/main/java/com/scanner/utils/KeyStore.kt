@@ -24,16 +24,17 @@ import java.security.KeyStore
 internal object KeyStore {
 
     private val tag = KeyStore::class.java.simpleName
+    private const val ANDROID_KEY_STORE = "AndroidKeyStore"
 
     private fun getKeyStore(): KeyStore {
-        val keystore = KeyStore.getInstance("AndroidKeyStore")
+        val keystore = KeyStore.getInstance(ANDROID_KEY_STORE)
         keystore.load(null)
         return keystore
     }
 
-    fun generateKey(key: String): SecretKey {
+    private fun generateKey(key: String): SecretKey {
         val keyGenerator =
-            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
         val keyGenParameterSpec = KeyGenParameterSpec.Builder(
             key,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
@@ -46,13 +47,15 @@ internal object KeyStore {
         return keyGenerator.generateKey()
     }
 
-    fun checkKey() {
+    fun checkKey(bvnNumber: String, readerNo: Int) {
         // need to create key with BVN_NUMBER +  BuildConfig.KEY + 0 & 1(for 2 fingerprints)
-        val key = BuildConfig.KEY
+        val key = getKey(bvnNumber, readerNo)
         val secretKey = getKeyStore().getKey(key, null) as SecretKey?
         if (secretKey == null)
             generateKey(key)
     }
+
+    fun getKey(bvnNumber: String, readerNo: Int) = bvnNumber + BuildConfig.KEY + readerNo
 
     private fun generateIv(): ByteArray {
         val iv = ByteArray(12)
@@ -60,8 +63,14 @@ internal object KeyStore {
         return iv
     }
 
-    fun Context.encryptData(data: ByteArray, callback: (ByteArray) -> Unit) {
-        val key = BuildConfig.KEY
+    fun Context.encryptData(
+        data: ByteArray,
+        bvnNumber: String,
+        readerNo: Int,
+        callback: (ByteArray) -> Unit
+    ) {
+        checkKey(bvnNumber, readerNo)
+        val key = getKey(bvnNumber, readerNo)
         val secretKey = getKeyStore().getKey(key, null) as SecretKey?
 //        val secretKey: SecretKey? = EncryptWrapper(this).generateSecretKey()
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -72,10 +81,13 @@ internal object KeyStore {
         saveEncryptedData(key, iv)
     }
 
-    fun Context.decryptData(filePath: String, callback: (ByteArray?) -> Unit) {
+    fun Context.decryptData(
+        filePath: String, bvnNumber: String,
+        readerNo: Int, callback: (ByteArray?) -> Unit
+    ) {
         try {
             val byteArray = readAllBytes(filePath)
-            val key = BuildConfig.KEY
+            val key = getKey(bvnNumber, readerNo)
             val encryptedData = getEncryptedData(Pair(key, "$key.iv"))
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val secretKey = getKeyStore().getKey(key, null) as SecretKey?

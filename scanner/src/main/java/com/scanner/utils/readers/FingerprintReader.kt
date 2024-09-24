@@ -7,6 +7,7 @@ import android.os.Environment
 import android.os.Process
 import android.util.Base64
 import android.util.Log
+import com.google.zxing.BarcodeActivity
 import com.nextbiometrics.biometrics.NBBiometricsContext
 import com.nextbiometrics.biometrics.NBBiometricsExtractResult
 import com.nextbiometrics.biometrics.NBBiometricsFingerPosition
@@ -760,7 +761,7 @@ internal class FingerprintReader(
                     templateType.toString()
                 )
             )
-            this.context.decryptData(fileName) {
+            this.context.decryptData(fileName, bvnNumber, readerNo) {
                 it?.let { array ->
                     Log.d(FingerprintReader::class.simpleName, "byte array size - ${array.size}")
 //            val template = context.loadTemplate(templateType, readAllBytes(fileName))
@@ -1231,7 +1232,7 @@ internal class FingerprintReader(
             !files.exists()
         ) {
             val binaryTemplate = context.saveTemplate(this)
-            this@FingerprintReader.context.encryptData(binaryTemplate) {
+            this@FingerprintReader.context.encryptData(binaryTemplate, bvnNumber, readerNo) {
                 showMessage(
                     String.format(
                         "Extracted template length: %d bytes",

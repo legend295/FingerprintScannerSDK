@@ -5,15 +5,24 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:name="com.scanner.app.ScannerApp"
         android:requestLegacyExternalStorage="true">
         <activity
             android:name="com.scanner.activity.ScannerActivity"
+            android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
             android:exported="false" />
+
+       <!-- <receiver
+            android:name="com.scanner.activity.ScannerActivity$BroadCastReceiverGPS"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.location.PROVIDERS_CHANGED" />
+            </intent-filter>
+        </receiver>-->
     </application>
 
 </manifest>
