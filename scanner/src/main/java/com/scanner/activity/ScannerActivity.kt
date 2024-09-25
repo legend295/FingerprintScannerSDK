@@ -173,6 +173,7 @@ internal class ScannerActivity : AppCompatActivity() {
         scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
         scanningOptions?.bvnNumber?.let { fingerprintHelper?.setBvnNumber(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
+        scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
 
         if (checkPermissions()) {
             handleLocationEmpty()

@@ -18,7 +18,7 @@ private val phoneNumber =
 
 fun Context.showFieldsDialog(
     type: ScanningType,
-    callback: (String, String, String, String) -> Unit
+    callback: (String, String, String, String, String) -> Unit
 ): BottomSheetDialog {
     val sheet = BottomSheetDialog(this, R.style.BottomSheetStyle)
     val layout = View.inflate(this, R.layout.layout_information_dialog, null)
@@ -26,6 +26,7 @@ fun Context.showFieldsDialog(
     val phoneNumber = layout.findViewById<AppCompatEditText>(R.id.etPhoneNumber)
     val amount = layout.findViewById<AppCompatEditText>(R.id.etAmount)
     val name = layout.findViewById<AppCompatEditText>(R.id.etName)
+    val etKey = layout.findViewById<AppCompatEditText>(R.id.etKey)
     if (type == ScanningType.VERIFICATION) {
         phoneNumber.visibility = View.GONE
         name.visibility = View.GONE
@@ -41,7 +42,8 @@ fun Context.showFieldsDialog(
             bvnNumber.text.toString(),
             phoneNumber.text.toString(),
             name.text.toString(),
-            amount.text.toString()
+            amount.text.toString(),
+            etKey.text.toString()
         )
     }
     sheet.setContentView(layout)

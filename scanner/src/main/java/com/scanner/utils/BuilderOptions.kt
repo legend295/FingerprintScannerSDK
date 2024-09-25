@@ -10,5 +10,6 @@ internal class BuilderOptions {
     var phoneNumber: String? = null
     var scanningType: ScanningType? = null
     var amount: Int? = null
+    var key: String? = null
 //    var firebaseFireStore: FirebaseFirestore? = null
 }

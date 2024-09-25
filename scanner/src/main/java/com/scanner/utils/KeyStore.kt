@@ -47,15 +47,18 @@ internal object KeyStore {
         return keyGenerator.generateKey()
     }
 
-    fun checkKey(bvnNumber: String, readerNo: Int) {
-        // need to create key with BVN_NUMBER +  BuildConfig.KEY + 0 & 1(for 2 fingerprints)
+    private fun checkKey(bvnNumber: String, readerNo: Int) {
+        try {// need to create key with BVN_NUMBER +  BuildConfig.KEY + 0 & 1(for 2 fingerprints)
+        } catch (e: Exception) {
+            TODO("Not yet implemented")
+        }
         val key = getKey(bvnNumber, readerNo)
         val secretKey = getKeyStore().getKey(key, null) as SecretKey?
         if (secretKey == null)
             generateKey(key)
     }
 
-    fun getKey(bvnNumber: String, readerNo: Int) = bvnNumber + BuildConfig.KEY + readerNo
+    private fun getKey(bvnNumber: String, readerNo: Int) = bvnNumber + ScannerApp.getInstance().key + readerNo
 
     private fun generateIv(): ByteArray {
         val iv = ByteArray(12)

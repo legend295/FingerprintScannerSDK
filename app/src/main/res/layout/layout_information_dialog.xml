@@ -39,26 +39,40 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:background="@drawable/bg_edit_text"
-        android:maxLength="30"
         android:hint="Name"
         android:imeOptions="actionDone"
         android:inputType="textPersonName"
+        android:maxLength="30"
         android:padding="10dp"
         app:layout_constraintTop_toBottomOf="@id/etPhoneNumber" />
 
     <androidx.appcompat.widget.AppCompatEditText
         android:id="@+id/etAmount"
-        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:background="@drawable/bg_edit_text"
         android:hint="Enter amount*"
-        android:maxLength="10"
         android:imeOptions="actionNext"
         android:inputType="phone"
+        android:maxLength="10"
         android:padding="10dp"
+        android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/etName" />
+
+    <androidx.appcompat.widget.AppCompatEditText
+        android:id="@+id/etKey"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_edit_text"
+        android:hint="Encryption Key"
+        android:imeOptions="actionDone"
+        android:inputType="text"
+        android:text="com.scanner.24e2c72b-6506-490d-a818-4112526db233"
+        android:maxLength="200"
+        android:padding="10dp"
+        app:layout_constraintTop_toBottomOf="@id/etAmount" />
 
     <Button
         android:id="@+id/btnDone"
@@ -67,7 +81,7 @@
         android:layout_marginTop="10dp"
         android:padding="15dp"
         android:text="Done"
-        app:layout_constraintTop_toBottomOf="@id/etAmount" />
+        app:layout_constraintTop_toBottomOf="@id/etKey" />
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

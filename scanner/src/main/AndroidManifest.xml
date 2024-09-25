@@ -10,10 +10,10 @@
 
     <application
         android:name="com.scanner.app.ScannerApp"
-        android:requestLegacyExternalStorage="true">
+        android:requestLegacyExternalStorage="true"
+        >
         <activity
             android:name="com.scanner.activity.ScannerActivity"
-            android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
             android:exported="false" />
 
        <!-- <receiver

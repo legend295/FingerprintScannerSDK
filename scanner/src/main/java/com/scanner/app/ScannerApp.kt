@@ -7,6 +7,7 @@ import com.scanner.utils.readers.FingerprintHelper
 internal class ScannerApp : Application() {
 
     internal var fingerprintHelper: FingerprintHelper? = null
+    internal var key: String? = null
 
 
     companion object {

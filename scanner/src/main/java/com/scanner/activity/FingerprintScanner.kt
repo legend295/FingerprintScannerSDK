@@ -43,6 +43,11 @@ class FingerprintScanner {
             return this
         }
 
+        fun setKey(key: String): Builder {
+            options.key = key
+            return this
+        }
+
         /*  fun setFirebaseFireStore(firebaseFireStore: FirebaseFirestore): Builder {
               options.firebaseFireStore = firebaseFireStore
               return this
@@ -76,6 +81,11 @@ class FingerprintScanner {
                 if (options.amount == null) throw NullPointerException("Please enter amount")
                 require((options.amount ?: 0) > 0) { "Please enter valid amount" }
             }
+            if (options.key?.trim()
+                    .isNullOrEmpty()
+            ) throw NullPointerException("Encryption key cannot be null or empty")
+            require(options.key?.trim()?.isNotEmpty() == true) { "Encryption key cannot be empty" }
+
 //            if (options.firebaseFireStore == null) throw NullPointerException("Firebase FireStore cannot be null")
         }
 
