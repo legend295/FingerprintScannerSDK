@@ -14,6 +14,7 @@
         >
         <activity
             android:name="com.scanner.activity.ScannerActivity"
+            android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
             android:exported="false" />
 
        <!-- <receiver

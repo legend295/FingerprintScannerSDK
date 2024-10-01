@@ -27,7 +27,8 @@ class MainActivity : AppCompatActivity() {
                 showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
                     FingerprintScanner.Builder(this).setBvnNumber(bvnNumber)
                         .setPhoneNumber(phoneNumber)
-                        .setScanningType(ScanningType.REGISTRATION).setKey(key)
+                        .setScanningType(ScanningType.REGISTRATION)
+                        .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
                         .start(this, scanningLauncher)
                 }
         }
@@ -36,7 +37,8 @@ class MainActivity : AppCompatActivity() {
             sheet = showFieldsDialog(ScanningType.VERIFICATION) { bvnNumber, _, _, amount, key ->
                 FingerprintScanner.Builder(this).setBvnNumber(bvnNumber)
                     .setAmount(amount.toInt())
-                    .setScanningType(ScanningType.VERIFICATION).setKey(key)
+                    .setScanningType(ScanningType.VERIFICATION)
+                    .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
                     .start(this, scanningLauncher)
             }
         }
