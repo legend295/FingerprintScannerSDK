@@ -11,8 +11,14 @@ internal class ScannerApp : Application() {
 
 
     companion object {
-        private lateinit var instance: ScannerApp
-        fun getInstance(): ScannerApp = instance
+        private var instance: ScannerApp? = null
+        fun getInstance(): ScannerApp = getValue()
+        private fun getValue(): ScannerApp {
+            if (instance == null) {
+                instance = ScannerApp()
+            }
+            return instance as ScannerApp
+        }
     }
 
     override fun onCreate() {
