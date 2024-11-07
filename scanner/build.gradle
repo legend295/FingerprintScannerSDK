@@ -84,4 +84,18 @@ dependencies {
     implementation 'com.google.firebase:firebase-firestore:25.1.0'
     implementation 'com.google.firebase:firebase-storage:21.0.0'
     implementation 'com.google.maps.android:android-maps-utils:2.0.3'
+
+    //NextCloud
+    implementation "commons-httpclient:commons-httpclient:3.1@jar"
+    implementation("com.github.nextcloud:android-library:2.19.1") {
+        exclude group: 'org.ogce', module: 'xpp3'
+        // unused in Android and brings wrong Junit version
+    }
+//    implementation 'com.github.nextcloud:android-library:3.30.0'
+    /*implementation 'org.apache.httpcomponents:httpclient:4.5.14'
+    configurations.configureEach {
+        resolutionStrategy {
+            force("org.apache.httpcomponents:httpclient:4.5.14")
+        }
+    }*/
 }

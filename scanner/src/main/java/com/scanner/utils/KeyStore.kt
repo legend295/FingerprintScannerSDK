@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import com.github.legend295.fingerprintscanner.BuildConfig
 import com.scanner.app.ScannerApp
 import java.io.BufferedInputStream
@@ -96,6 +97,10 @@ internal object KeyStore {
             val secretKey = getKeyStore().getKey(key, null) as SecretKey?
             secretKey ?: return
             if (encryptedData.second == null) {
+                Log.d(
+                    "WaxdPosLib",
+                    "FingerprintReader[$readerNo]::loadTemplate -> key is null}"
+                )
                 callback(null)
                 return
             }
@@ -104,9 +109,17 @@ internal object KeyStore {
 //            return cipher.doFinal(encryptedData.first)
                 callback(cipher.doFinal(byteArray))
             } catch (e: AEADBadTagException) {
+                Log.d(
+                    "WaxdPosLib",
+                    "FingerprintReader[$readerNo]::decryptData AEADBadTagException-> ${e.message}"
+                )
                 callback(null)
             }
         } catch (e: Exception) {
+            Log.d(
+                "WaxdPosLib",
+                "FingerprintReader[$readerNo]::decryptData Exception-> ${e.message}"
+            )
             callback(null)
         }
     }

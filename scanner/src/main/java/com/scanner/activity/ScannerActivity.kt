@@ -44,6 +44,9 @@ import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
 import com.nextbiometrics.devices.NBDeviceScanStatus
+import com.owncloud.android.lib.common.network.OnDatatransferProgressListener
+import com.owncloud.android.lib.common.operations.OnRemoteOperationListener
+import com.owncloud.android.lib.common.operations.RemoteOperationResult
 import com.scanner.app.ScannerApp
 import com.scanner.model.Transaction
 import com.scanner.model.User
@@ -60,6 +63,7 @@ import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
 import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.location.LocationWrapper
+import com.scanner.utils.nextcloud.NextCloudWrapper
 import com.scanner.utils.readers.FingerprintHelper
 import com.scanner.utils.readersInitializationDialog
 import com.scanner.utils.templatesDownloadDialog
@@ -120,6 +124,8 @@ internal class ScannerActivity : AppCompatActivity() {
     private val locationWrapper: LocationWrapper = LocationWrapper(this)
     private var timer: CountDownTimer? = null
     private var alertDialog: AlertDialog? = null
+
+    private val nextCloudWrapper by lazy { NextCloudWrapper(this) }
 
     companion object {
         var location: LatLng? = null
@@ -213,6 +219,45 @@ internal class ScannerActivity : AppCompatActivity() {
             fingerprintHelper?.stop()
             setResult(RESULT_CANCELED)
             finish()
+        }
+        val file = File(filesDir.path + "/12121212121/")
+        val fileLists = file.listFiles()
+        fileLists?.forEach {
+            nextCloudWrapper.startUpload(
+                it,
+                "12121212121${it.absolutePath}",
+                ".bin",
+                { p0, p1, p2, p3 ->
+
+                },
+                { operation, result ->
+                    if (result?.isSuccess == true)
+                        Log.d(ScannerActivity::class.simpleName, "File Uploaded over")
+                    else Log.e(ScannerActivity::class.simpleName, "File Upload Failed")
+                }
+            )
+            Thread.sleep(300)
+        }
+        nextCloudWrapper.startReadRootFolder(path = "12121212121") {
+            it?.forEach { remoteFile->
+                Log.d(ScannerActivity::class.simpleName, "File Name - ${remoteFile.remoteId}")
+            }
+            /*val fileDownload = File(filesDir.path + "/12121212122/")
+            nextCloudWrapper.startDownload(
+                "12121212121/2024-10-10-17-26-570-ISO-Template.bin",
+                fileDownload,
+                { p0, p1, p2, p3 -> },
+                { operation, result ->
+                    if (result?.isSuccess == true)
+                        Log.d(ScannerActivity::class.simpleName, "File Download Success")
+                    else Log.e(ScannerActivity::class.simpleName, "File Download Failed")
+                })*/
+        }
+
+        nextCloudWrapper.readFilesFromFolder(path = "12121212121") {
+            it?.forEach { remoteFile->
+                Log.d(ScannerActivity::class.simpleName, "File Name - ${remoteFile.remoteId}")
+            }
         }
     }
 
@@ -674,6 +719,23 @@ internal class ScannerActivity : AppCompatActivity() {
                 hashMapOf("fingerPrintLocalPath" to localFileRefs)
             )
             Log.d(ScannerActivity::class.simpleName, file.name)
+            nextCloudWrapper.startFolderCreation(scanningOptions?.bvnNumber!!) { result ->
+                if (result?.code == RemoteOperationResult.ResultCode.FOLDER_ALREADY_EXISTS || result?.isSuccess == true) {
+                    nextCloudWrapper.startUpload(
+                        file,
+                        scanningOptions?.bvnNumber!!,
+                        "",
+                        { p0, p1, p2, p3 ->
+
+                        },
+                        { operation, result ->
+                            if (result?.isSuccess == true)
+                                Log.d(ScannerActivity::class.simpleName, "File Uploaded over")
+                            else Log.e(ScannerActivity::class.simpleName, "File Upload Failed")
+                        }
+                    )
+                }
+            }
             uploadFileFromLocalToFirebaseStorage(scanningOptions?.bvnNumber!!, Uri.fromFile(file))
         }
     }
