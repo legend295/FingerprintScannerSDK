@@ -762,16 +762,30 @@ internal class FingerprintReader(
                 )
             )
             this.context.decryptData(fileName, bvnNumber, readerNo) {
+                Log.d(
+                    "WaxdPosLib",
+                    "FingerprintReader[$readerNo]::loadTemplate -> ${it?.size ?: 0}"
+                )
                 it?.let { array ->
                     Log.d(FingerprintReader::class.simpleName, "byte array size - ${array.size}")
 //            val template = context.loadTemplate(templateType, readAllBytes(fileName))
                     val template = context.loadTemplate(templateType, array)
                     println("Template loaded successfully.")
                     callback(template)
+                }?:run {
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerprintReader[$readerNo]::loadTemplate -> array size is empty}"
+                    )
+                    callback(null)
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            Log.d(
+                "WaxdPosLib",
+                "FingerprintReader[$readerNo]::loadTemplate Exception-> ${e.message}"
+            )
             callback(null)
         }
 
