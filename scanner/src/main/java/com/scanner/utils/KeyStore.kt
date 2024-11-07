@@ -26,6 +26,7 @@ internal object KeyStore {
 
     private val tag = KeyStore::class.java.simpleName
     private const val ANDROID_KEY_STORE = "AndroidKeyStore"
+    private const val PACKAGE = "com.scanner.24e2c72b-6504346-490d-a818-4112534356233.EncryptedDataPrefs"
 
     private fun getKeyStore(): KeyStore {
         val keystore = KeyStore.getInstance(ANDROID_KEY_STORE)
@@ -159,7 +160,7 @@ internal object KeyStore {
 
     private fun Context.saveEncryptedData(key: String, iv: ByteArray) {
         val sharedPrefs = getSharedPreferences(
-            "${ScannerApp.getInstance().packageName}.EncryptedDataPrefs",
+            PACKAGE,
             Context.MODE_PRIVATE
         )
         with(sharedPrefs.edit()) {
@@ -171,7 +172,7 @@ internal object KeyStore {
 
     private fun Context.getEncryptedData(pair: Pair<String, String>): Pair<ByteArray?, ByteArray?> {
         val sharedPrefs = getSharedPreferences(
-            "${ScannerApp.getInstance().packageName}.EncryptedDataPrefs",
+            PACKAGE,
             Context.MODE_PRIVATE
         )
         val encryptedDataString = sharedPrefs.getString(pair.first, null)
