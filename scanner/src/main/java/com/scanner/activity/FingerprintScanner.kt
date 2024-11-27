@@ -7,9 +7,9 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.fragment.app.Fragment
-import com.google.firebase.firestore.FirebaseFirestore
 import com.google.gson.Gson
-import com.scanner.utils.BuilderOptions
+import com.scanner.utils.builder.BuilderOptions
+import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.Constant.SCANNING_OPTIONS
 import com.scanner.utils.enums.ScanningType
 
@@ -45,6 +45,11 @@ class FingerprintScanner {
 
         fun setKey(key: String): Builder {
             options.key = key
+            return this
+        }
+
+        fun setThemeOptions(themeOptions: ThemeOptions): Builder {
+            options.themeOptions = themeOptions
             return this
         }
 

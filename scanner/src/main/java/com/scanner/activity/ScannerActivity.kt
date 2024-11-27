@@ -4,10 +4,10 @@ import android.Manifest
 import android.Manifest.permission.ACCESS_COARSE_LOCATION
 import android.Manifest.permission.ACCESS_FINE_LOCATION
 import android.app.Dialog
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -27,7 +27,6 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.location.LocationManagerCompat.isLocationEnabled
 import com.github.legend295.fingerprintscanner.R
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.DocumentSnapshot
@@ -38,8 +37,6 @@ import com.google.firebase.storage.StorageReference
 import com.google.firebase.storage.ktx.storage
 import com.google.gson.Gson
 import com.google.maps.android.SphericalUtil
-import com.google.zxing.BarcodeActivity
-import com.google.zxing.pdf417.encoder.BarcodeMatrix
 import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -47,8 +44,9 @@ import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.scanner.app.ScannerApp
 import com.scanner.model.Transaction
 import com.scanner.model.User
-import com.scanner.utils.BuilderOptions
+import com.scanner.utils.builder.BuilderOptions
 import com.scanner.utils.ReaderStatus
+import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.Constant
 import com.scanner.utils.constants.Constant.FINGER_PRINT_READ_INFO
 import com.scanner.utils.constants.ScannerConstants
@@ -85,6 +83,8 @@ internal class ScannerActivity : AppCompatActivity() {
     private var btnCancel: AppCompatButton? = null
     private var ivScannerLeft: AppCompatImageView? = null
     private var ivScannerRight: AppCompatImageView? = null
+    private var tvScanFingerprints: AppCompatTextView? = null
+    private var tvScanMessage: AppCompatTextView? = null
     private var messagesHolder: LinearLayout? = null
     private var scrollView: ScrollView? = null
 
@@ -146,6 +146,14 @@ internal class ScannerActivity : AppCompatActivity() {
         tvRightQuality = findViewById(R.id.tvRightQuality)
         messagesHolder = findViewById(R.id.messagesHolder)
         scrollView = findViewById(R.id.scrollView1)
+        tvScanFingerprints = findViewById(R.id.tvScanFingerprints)
+        tvScanMessage = findViewById(R.id.tvScanMessage)
+
+        val bundle = intent.extras
+        val options = bundle?.getString(Constant.SCANNING_OPTIONS)
+        scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
+
+        setCustomTheme(scanningOptions?.themeOptions)
 
         /*  doWeNeedToReinitialize = true
           fingerprintHelper = FingerprintHelper(
@@ -168,9 +176,7 @@ internal class ScannerActivity : AppCompatActivity() {
         fingerprintHelper?.setListOfTemplate(listOfTemplate = listOfTemplate)
         fingerprintHelper?.setOnFileSaveListener(listener = onFileSavedListener(list))
 
-        val bundle = intent.extras
-        val options = bundle?.getString(Constant.SCANNING_OPTIONS)
-        scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
+
         scanningOptions?.bvnNumber?.let { fingerprintHelper?.setBvnNumber(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
@@ -214,6 +220,52 @@ internal class ScannerActivity : AppCompatActivity() {
             setResult(RESULT_CANCELED)
             finish()
         }
+    }
+
+    private fun setCustomTheme(themeOptions: ThemeOptions?) {
+        try {
+            themeOptions?.let {
+                // Button Start Theme
+                btnStart?.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, it.buttonColor))
+                btnStart?.setTextColor(ContextCompat.getColor(this, it.buttonTextColor))
+
+                // Button Cancel Theme
+                btnCancel?.backgroundTintList =
+                    ColorStateList.valueOf(ContextCompat.getColor(this, it.buttonColor))
+                btnCancel?.setTextColor(ContextCompat.getColor(this, it.buttonTextColor))
+
+                // Message Text Theme
+                tvStatus?.setTextColor(ContextCompat.getColor(this, it.messageColor))
+
+                // Title & Content Text Theme
+                tvScanFingerprints?.setTextColor(ContextCompat.getColor(this, it.titleTextColor))
+                tvScanMessage?.setTextColor(ContextCompat.getColor(this, it.contentTextColor))
+            } ?: run {
+                handleDefaultTheme()
+            }
+        } catch (e: Exception) {
+            handleDefaultTheme()
+        }
+
+    }
+
+    private fun handleDefaultTheme() {
+        // Default Start Button Theme
+        btnStart?.backgroundTintList =
+            ColorStateList.valueOf(ContextCompat.getColor(this, R.color.infraRed))
+        btnStart?.setTextColor(ContextCompat.getColor(this, R.color.white))
+
+        // Default Cancel Button Theme
+        btnCancel?.backgroundTintList =
+            ColorStateList.valueOf(ContextCompat.getColor(this, R.color.infraRed))
+        btnCancel?.setTextColor(ContextCompat.getColor(this, R.color.white))
+
+        // Message Text Theme
+        tvStatus?.setTextColor(ContextCompat.getColor(this, R.color.robinEggBlue))
+        // Title & Content Text Theme
+        tvScanFingerprints?.setTextColor(ContextCompat.getColor(this, R.color.black))
+        tvScanMessage?.setTextColor(ContextCompat.getColor(this, R.color.black))
     }
 
     private fun saveUserToDB() {

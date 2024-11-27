@@ -9,6 +9,7 @@ import androidx.appcompat.widget.AppCompatTextView
 import com.fingerprintscanner.utility.showFieldsDialog
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.scanner.activity.FingerprintScanner
+import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.ScanningType
 import java.io.File
@@ -22,6 +23,13 @@ class MainActivity : AppCompatActivity() {
         val tvRegistration: Button = findViewById(R.id.btnRegistration)
         val tvVerification: Button = findViewById(R.id.btnVerification)
         tvStatus = findViewById(R.id.tvStatus)
+        val themeOptions = ThemeOptions().apply {
+            buttonColor = R.color.black
+            buttonTextColor = R.color.white
+            messageColor = R.color.black
+            titleTextColor = R.color.black
+            contentTextColor = R.color.black
+        }
         tvRegistration.setOnClickListener {
             sheet =
                 showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
@@ -29,6 +37,7 @@ class MainActivity : AppCompatActivity() {
                         .setPhoneNumber(phoneNumber)
                         .setScanningType(ScanningType.REGISTRATION)
                         .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
+                        .setThemeOptions(themeOptions)
                         .start(this, scanningLauncher)
                 }
         }

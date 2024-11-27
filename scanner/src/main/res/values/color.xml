@@ -14,4 +14,5 @@
     <color name="button_text_color">#A9A9A9</color>
     <color name="success_color">#31EC38</color>
     <color name="error_color">#A5180D</color>
+    <color name="infraRed">#FE3C72</color>
 </resources>

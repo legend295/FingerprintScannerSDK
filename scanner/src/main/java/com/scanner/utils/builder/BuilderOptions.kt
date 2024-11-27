@@ -1,6 +1,6 @@
-package com.scanner.utils
+package com.scanner.utils.builder
 
-import com.google.firebase.firestore.FirebaseFirestore
+import com.github.legend295.fingerprintscanner.R
 import com.scanner.utils.enums.ScanningType
 
 internal class BuilderOptions {
@@ -11,5 +11,7 @@ internal class BuilderOptions {
     var scanningType: ScanningType? = null
     var amount: Int? = null
     var key: String? = null
+    var themeOptions: ThemeOptions? = null
 //    var firebaseFireStore: FirebaseFirestore? = null
 }
+
