@@ -10,6 +10,7 @@
         android:background="@drawable/bg_round_white"
         android:paddingStart="@dimen/padding"
         android:paddingTop="@dimen/padding"
+        android:id="@+id/main"
         android:paddingEnd="@dimen/padding"
         android:paddingBottom="20dp">
 

@@ -9,15 +9,21 @@ import android.view.View
 import android.widget.ProgressBar
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import com.github.legend295.fingerprintscanner.R
 import com.github.legend295.fingerprintscanner.databinding.LayoutInitializationDialogBinding
+import com.scanner.utils.builder.ThemeOptions
 import java.util.logging.Handler
 
-internal fun Context.readersInitializationDialog(): Dialog {
+internal fun Context.readersInitializationDialog(themeOptions: ThemeOptions?): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
-//    val tvStatus = layout.findViewById<AppCompatTextView>(R.id.tvStatus)
+    val parent = layout.findViewById<ConstraintLayout>(R.id.main)
+    parent.background = ContextCompat.getDrawable(
+        this@readersInitializationDialog,
+        themeOptions?.popUpBackground ?: R.drawable.bg_round_white
+    )
     with(layout) {
         setOnClickListener {
 //            dialog.dismiss()
@@ -30,10 +36,19 @@ internal fun Context.readersInitializationDialog(): Dialog {
     return dialog
 }
 
-internal fun Context.verificationDialog(isSuccess: Boolean, callback: () -> Unit): Dialog {
+internal fun Context.verificationDialog(
+    themeOptions: ThemeOptions?,
+    isSuccess: Boolean,
+    callback: () -> Unit
+): Dialog {
     Log.d(this::class.simpleName, "showing:: verificationDialog")
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+    val parent = layout.findViewById<ConstraintLayout>(R.id.main)
+    parent.background = ContextCompat.getDrawable(
+        this,
+        themeOptions?.popUpBackground ?: R.drawable.bg_round_white
+    )
     with(layout) {
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)
@@ -66,10 +81,14 @@ internal fun Context.verificationDialog(isSuccess: Boolean, callback: () -> Unit
     return dialog
 }
 
-internal fun Context.templatesDownloadDialog(): Dialog {
+internal fun Context.templatesDownloadDialog(themeOptions: ThemeOptions?): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
-
+    val parent = layout.findViewById<ConstraintLayout>(R.id.main)
+    parent.background = ContextCompat.getDrawable(
+        this,
+        themeOptions?.popUpBackground ?: R.drawable.bg_round_white
+    )
     with(layout) {
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)
@@ -83,9 +102,17 @@ internal fun Context.templatesDownloadDialog(): Dialog {
     return dialog
 }
 
-internal fun Context.transactionOutOfArea(callback: () -> Unit): Dialog {
+internal fun Context.transactionOutOfArea(
+    themeOptions: ThemeOptions?,
+    callback: () -> Unit
+): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+    val parent = layout.findViewById<ConstraintLayout>(R.id.main)
+    parent.background = ContextCompat.getDrawable(
+        this,
+        themeOptions?.popUpBackground ?: R.drawable.bg_round_white
+    )
     with(layout) {
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)
@@ -118,9 +145,17 @@ internal fun Context.transactionOutOfArea(callback: () -> Unit): Dialog {
     return dialog
 }
 
-internal fun Context.fetchingLocationDialog(callback: () -> Unit): Dialog {
+internal fun Context.fetchingLocationDialog(
+    themeOptions: ThemeOptions?,
+    callback: () -> Unit
+): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+    val parent = layout.findViewById<ConstraintLayout>(R.id.main)
+    parent.background = ContextCompat.getDrawable(
+        this,
+        themeOptions?.popUpBackground ?: R.drawable.bg_round_white
+    )
     with(layout) {
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)
@@ -136,8 +171,8 @@ internal fun Context.fetchingLocationDialog(callback: () -> Unit): Dialog {
         title.text = "Fetching Location..."
         message.text = "Please wait while we are\nfetching current location."
         ivClose.setOnClickListener {
-           /* dialog.dismiss()
-            callback()*/
+            /* dialog.dismiss()
+             callback()*/
         }
     }
 
@@ -148,9 +183,14 @@ internal fun Context.fetchingLocationDialog(callback: () -> Unit): Dialog {
     return dialog
 }
 
-internal fun Context.fetchingUserDB(callback: () -> Unit): Dialog {
+internal fun Context.fetchingUserDB(themeOptions: ThemeOptions?, callback: () -> Unit): Dialog {
     val dialog = Dialog(this, R.style.DialogStyleInstagram)
     val layout = View.inflate(this, R.layout.layout_initialization_dialog, null)
+    val parent = layout.findViewById<ConstraintLayout>(R.id.main)
+    parent.background = ContextCompat.getDrawable(
+        this,
+        themeOptions?.popUpBackground ?: R.drawable.bg_round_white
+    )
     with(layout) {
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)

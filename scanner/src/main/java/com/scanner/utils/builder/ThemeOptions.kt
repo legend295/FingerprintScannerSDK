@@ -8,4 +8,6 @@ class ThemeOptions {
     var messageColor: Int = R.color.robinEggBlue // Message/Status text color
     var titleTextColor: Int = R.color.black // Title text color
     var contentTextColor: Int = R.color.black // Title text color
+    var buttonBackground: Int = R.drawable.bg_round_white // Button background
+    var popUpBackground: Int = R.drawable.bg_round_white // Button background
 }

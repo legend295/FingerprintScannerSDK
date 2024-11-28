@@ -29,6 +29,8 @@ class MainActivity : AppCompatActivity() {
             messageColor = R.color.black
             titleTextColor = R.color.black
             contentTextColor = R.color.black
+            buttonBackground = R.drawable.bg_round_white
+            popUpBackground = R.drawable.bg_round_white
         }
         tvRegistration.setOnClickListener {
             sheet =

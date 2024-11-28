@@ -241,6 +241,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 // Title & Content Text Theme
                 tvScanFingerprints?.setTextColor(ContextCompat.getColor(this, it.titleTextColor))
                 tvScanMessage?.setTextColor(ContextCompat.getColor(this, it.contentTextColor))
+
+                // Button Background Theme
+                btnStart?.background = ContextCompat.getDrawable(this, it.buttonBackground)
+                btnCancel?.background = ContextCompat.getDrawable(this, it.buttonBackground)
             } ?: run {
                 handleDefaultTheme()
             }
@@ -263,9 +267,14 @@ internal class ScannerActivity : AppCompatActivity() {
 
         // Message Text Theme
         tvStatus?.setTextColor(ContextCompat.getColor(this, R.color.robinEggBlue))
+
         // Title & Content Text Theme
         tvScanFingerprints?.setTextColor(ContextCompat.getColor(this, R.color.black))
         tvScanMessage?.setTextColor(ContextCompat.getColor(this, R.color.black))
+
+        // Button Background Theme
+        btnStart?.background = ContextCompat.getDrawable(this, R.drawable.bg_round_white)
+        btnCancel?.background = ContextCompat.getDrawable(this, R.drawable.bg_round_white)
     }
 
     private fun saveUserToDB() {
@@ -281,7 +290,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private fun handleLocationEmpty() {
         if (locationWrapper.isLocationEnabled(this)) {
             locationWrapper.getLocation {}
-            val dialog = fetchingLocationDialog {}
+            val dialog = fetchingLocationDialog(scanningOptions?.themeOptions) {}
             timer = object : CountDownTimer(10000, 1000) {
                 override fun onTick(millisUntilFinished: Long) {
                     Log.d(tag, "$location")
@@ -312,7 +321,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun init() {
         scanningOptions?.bvnNumber?.let { bvnNumber ->
-            val dialog = fetchingUserDB {}
+            val dialog = fetchingUserDB(scanningOptions?.themeOptions) {}
             getUser(bvnNumber) { userFound, user ->
                 dialog.dismiss()
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
@@ -346,7 +355,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
                                 // Check distance
                                 if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
-                                    transactionOutOfArea {
+                                    transactionOutOfArea(scanningOptions?.themeOptions) {
                                         finish()
                                     }
                                 } else {
@@ -435,14 +444,14 @@ internal class ScannerActivity : AppCompatActivity() {
      */
     private fun getDialog(): Dialog? {
         if (dialog == null) {
-            dialog = readersInitializationDialog()
+            dialog = readersInitializationDialog(scanningOptions?.themeOptions)
         }
         return dialog
     }
 
     private fun getTemplateDownloadDialog(): Dialog? {
         if (templateDownloadDialog == null) {
-            templateDownloadDialog = templatesDownloadDialog()
+            templateDownloadDialog = templatesDownloadDialog(scanningOptions?.themeOptions)
         }
         return templateDownloadDialog
     }
@@ -1066,7 +1075,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     readerStatus = ReaderStatus.FINGERS_VERIFICATION_FAILED
                     runOnUiThread {
                         if (verificationDialog == null)
-                            verificationDialog = verificationDialog(isSuccess = false) {
+                            verificationDialog = verificationDialog(scanningOptions?.themeOptions,isSuccess = false) {
                                 setFingerprintScanningResult(false)
                             }
                     }
@@ -1074,7 +1083,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 } else {
                     runOnUiThread {
                         if (verificationDialog == null)
-                            verificationDialog = verificationDialog(isSuccess = false) {
+                            verificationDialog = verificationDialog(scanningOptions?.themeOptions,isSuccess = false) {
                                 setFingerprintScanningResult(false)
                             }
                     }
@@ -1087,7 +1096,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
                 runOnUiThread {
                     if (verificationDialog == null)
-                        verificationDialog = verificationDialog(true) {
+                        verificationDialog = verificationDialog(scanningOptions?.themeOptions,true) {
                             setFingerprintScanningResult(result = true)
                         }
                 }
