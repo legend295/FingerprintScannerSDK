@@ -15,7 +15,7 @@
         android:hint="BVN Number*"
         android:imeOptions="actionNext"
         android:inputType="text"
-        android:text="99999999911"
+        android:text="99999999912"
         android:maxLength="11"
         android:maxLines="1"
         android:padding="10dp"

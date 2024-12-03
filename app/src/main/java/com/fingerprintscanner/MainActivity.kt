@@ -12,6 +12,7 @@ import com.scanner.activity.FingerprintScanner
 import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.ScanningType
+import org.json.JSONObject
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
@@ -40,6 +41,9 @@ class MainActivity : AppCompatActivity() {
                         .setScanningType(ScanningType.REGISTRATION)
                         .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
                         .setThemeOptions(themeOptions)
+                        .setCustomData(JSONObject().apply {
+                            put("pin", 1234)
+                        })
                         .start(this, scanningLauncher)
                 }
         }
@@ -68,6 +72,9 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (it.resultCode == RESULT_OK) {
                 val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
+                val customObject: JSONObject =
+                    (it.data?.getStringExtra(ScannerConstants.CUSTOM_DATA).toString()) as JSONObject
+                Log.d(MainActivity::class.simpleName, customObject.toString())
                 val isVerified: Boolean? =
                     it.data?.getBooleanExtra(ScannerConstants.VERIFICATION_RESULT, false)
                 Log.d(MainActivity::class.simpleName, list?.size.toString())

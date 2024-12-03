@@ -12,6 +12,7 @@ import com.scanner.utils.builder.BuilderOptions
 import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.Constant.SCANNING_OPTIONS
 import com.scanner.utils.enums.ScanningType
+import org.json.JSONObject
 
 class FingerprintScanner {
 
@@ -50,6 +51,11 @@ class FingerprintScanner {
 
         fun setThemeOptions(themeOptions: ThemeOptions): Builder {
             options.themeOptions = themeOptions
+            return this
+        }
+
+        fun setCustomData(customObject: JSONObject): Builder {
+            options.customObject = customObject
             return this
         }
 

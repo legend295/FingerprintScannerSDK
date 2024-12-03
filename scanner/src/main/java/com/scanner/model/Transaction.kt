@@ -7,4 +7,5 @@ internal data class Transaction(
     var timestamp: Date? = null,
     var bvnNumber: String? = null,
     var gpsCoordinates: ArrayList<Double?>? = null,
+    var customObject: MutableMap<String, Any>? = null
 )

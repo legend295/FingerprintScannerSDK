@@ -120,6 +120,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private val locationWrapper: LocationWrapper = LocationWrapper(this)
     private var timer: CountDownTimer? = null
     private var alertDialog: AlertDialog? = null
+    private var currentUser: User? = null
 
     companion object {
         var location: LatLng? = null
@@ -324,6 +325,7 @@ internal class ScannerActivity : AppCompatActivity() {
             val dialog = fetchingUserDB(scanningOptions?.themeOptions) {}
             getUser(bvnNumber) { userFound, user ->
                 dialog.dismiss()
+                currentUser = user
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
                     if (userFound && user?.fingerPrintSyncedOnCloud == true) {
                         handleMessageAndFinish("The user is already registered with entered BVN number. Please try with new BVN.")
@@ -536,6 +538,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
                 val intent = Intent()
                 intent.putExtra(ScannerConstants.DATA, list) // Add the read data to the intent.
+                intent.putExtra(ScannerConstants.CUSTOM_DATA, currentUser?.customObject?.toString())
                 setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
                 finish() // Close the current activity.
             }
@@ -1075,7 +1078,10 @@ internal class ScannerActivity : AppCompatActivity() {
                     readerStatus = ReaderStatus.FINGERS_VERIFICATION_FAILED
                     runOnUiThread {
                         if (verificationDialog == null)
-                            verificationDialog = verificationDialog(scanningOptions?.themeOptions,isSuccess = false) {
+                            verificationDialog = verificationDialog(
+                                scanningOptions?.themeOptions,
+                                isSuccess = false
+                            ) {
                                 setFingerprintScanningResult(false)
                             }
                     }
@@ -1083,7 +1089,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 } else {
                     runOnUiThread {
                         if (verificationDialog == null)
-                            verificationDialog = verificationDialog(scanningOptions?.themeOptions,isSuccess = false) {
+                            verificationDialog = verificationDialog(
+                                scanningOptions?.themeOptions,
+                                isSuccess = false
+                            ) {
                                 setFingerprintScanningResult(false)
                             }
                     }
@@ -1096,9 +1105,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
                 runOnUiThread {
                     if (verificationDialog == null)
-                        verificationDialog = verificationDialog(scanningOptions?.themeOptions,true) {
-                            setFingerprintScanningResult(result = true)
-                        }
+                        verificationDialog =
+                            verificationDialog(scanningOptions?.themeOptions, true) {
+                                setFingerprintScanningResult(result = true)
+                            }
                 }
                 setMessage("Fingerprint verified successfully.")
                 saveTransactionToDb()
@@ -1268,6 +1278,12 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun saveUserToDb() {
+        val data = mutableMapOf<String, Any>()
+        scanningOptions?.customObject?.let {
+            for (key in it.keys()) {
+                data[key] = it.get(key)
+            }
+        }
         val user = User(
             scanningOptions?.bvnNumber ?: "",
             "alskdfjlaf",
@@ -1283,10 +1299,12 @@ internal class ScannerActivity : AppCompatActivity() {
             fingerPrintSyncedOnCloud = false,
             0,
             Date(),
-            arrayListOf(location?.latitude, location?.longitude)
+            arrayListOf(location?.latitude, location?.longitude),
+            data
         )
         db.collection("users").document(scanningOptions?.bvnNumber!!).set(user)
             .addOnSuccessListener {
+                currentUser = user
                 Log.d(ScannerActivity::class.simpleName, "Success")
             }
             .addOnFailureListener {
@@ -1460,11 +1478,18 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun saveTransactionToDb() {
+        val data = mutableMapOf<String, Any>()
+        scanningOptions?.customObject?.let {
+            for (key in it.keys()) {
+                data[key] = it.get(key)
+            }
+        }
         val transaction = Transaction(
             scanningOptions?.amount,
             Date(),
             scanningOptions?.bvnNumber ?: "",
-            arrayListOf(location?.latitude, location?.longitude)
+            arrayListOf(location?.latitude, location?.longitude),
+            data
         )
         db.collection("transaction")/*.document(scanningOptions?.bvnNumber!!).collection("${Date()}")*/
             .document().set(transaction)

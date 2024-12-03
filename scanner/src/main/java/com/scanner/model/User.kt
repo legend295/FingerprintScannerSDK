@@ -18,4 +18,5 @@ internal data class User(
     var amount: Int? = null,
     var timestamp: Date? = null,
     var gpsCoordinates: ArrayList<Double?>? = null,
+    var customObject: MutableMap<String, Any>? = null
 )
