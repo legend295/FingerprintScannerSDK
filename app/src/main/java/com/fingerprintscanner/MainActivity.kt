@@ -57,6 +57,21 @@ class MainActivity : AppCompatActivity() {
                     .start(this, scanningLauncher)
             }
         }
+
+
+
+        val data = mutableMapOf<String, Any>()
+        data.apply {
+            put("pin", 1235)
+        }
+        FingerprintScanner().updateCustomDataInDb("99999999912", data)
+
+        FingerprintScanner().getUser("99999999912") { isSuccess, user ->
+            Log.d(MainActivity::class.simpleName, user.toString())
+            if (isSuccess) {
+
+            }
+        }
     }
 
     override fun onPause() {

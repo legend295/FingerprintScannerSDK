@@ -2,7 +2,7 @@ package com.scanner.model
 
 import java.util.Date
 
-internal data class User(
+data class User(
     var bvnNumber: String? = null,
     var deviceId: String? = null,
     var userId: String? = null,

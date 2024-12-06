@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.fragment.app.Fragment
 import com.google.gson.Gson
+import com.scanner.model.User
 import com.scanner.utils.builder.BuilderOptions
 import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.Constant.SCANNING_OPTIONS
@@ -111,6 +112,15 @@ class FingerprintScanner {
             intent.putExtras(bundle)
             return intent
         }
+    }
+
+
+    fun getUser(bvnNumber: String, callback: (Boolean, User?) -> Unit) {
+        ScannerActivity().getUser(bvnNumber, callback)
+    }
+
+    fun updateCustomDataInDb(bvnNumber: String, map: MutableMap<String, Any>) {
+        ScannerActivity().updateCustomDataInDb(bvnNumber, hashMapOf("customObject" to map))
     }
 
 }

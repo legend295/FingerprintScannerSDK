@@ -1323,8 +1323,18 @@ internal class ScannerActivity : AppCompatActivity() {
             }
     }
 
-    private fun getUser(bvnNumber: String, callback: (Boolean, User?) -> Unit) {
-        db.collection("users").document(bvnNumber).get().addOnSuccessListener {
+    fun updateCustomDataInDb(bvnNumber: String, map: HashMap<String, Any>) {
+        Firebase.firestore.collection("users").document(bvnNumber).update(map)
+            .addOnSuccessListener {
+                Log.d(ScannerActivity::class.simpleName, "User update success")
+            }
+            .addOnFailureListener {
+                Log.e(ScannerActivity::class.simpleName, "User update failed ${it.message}")
+            }
+    }
+
+    fun getUser(bvnNumber: String, callback: (Boolean, User?) -> Unit) {
+        Firebase.firestore.collection("users").document(bvnNumber).get().addOnSuccessListener {
             Log.d(ScannerActivity::class.simpleName, "User in db - $it")
             val user = it.toObject(User::class.java)
             callback(user != null, user)
