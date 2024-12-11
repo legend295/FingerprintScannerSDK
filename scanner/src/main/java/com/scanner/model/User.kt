@@ -3,7 +3,7 @@ package com.scanner.model
 import java.util.Date
 
 data class User(
-    var bvnNumber: String? = null,
+    var uniqueId: String? = null,
     var deviceId: String? = null,
     var userId: String? = null,
     var phoneNumber: String? = null,
@@ -15,7 +15,6 @@ data class User(
     var fingerPrintLocalPath: ArrayList<String>? = null,
     var fingerPrintCloudPath: ArrayList<String>? = null,
     var fingerPrintSyncedOnCloud: Boolean? = null,
-    var amount: Int? = null,
     var timestamp: Date? = null,
     var gpsCoordinates: ArrayList<Double?>? = null,
     var customObject: MutableMap<String, Any>? = null

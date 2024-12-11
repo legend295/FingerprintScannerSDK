@@ -178,7 +178,7 @@ internal class ScannerActivity : AppCompatActivity() {
         fingerprintHelper?.setOnFileSaveListener(listener = onFileSavedListener(list))
 
 
-        scanningOptions?.bvnNumber?.let { fingerprintHelper?.setBvnNumber(it) }
+        scanningOptions?.uniqueId?.let { fingerprintHelper?.setBvnNumber(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
 
@@ -279,7 +279,7 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun saveUserToDB() {
-        scanningOptions?.bvnNumber?.let {
+        scanningOptions?.uniqueId?.let {
             getUser(it) { userFound, _ ->
                 if (!userFound) {
                     saveUserToDb()
@@ -321,7 +321,7 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun init() {
-        scanningOptions?.bvnNumber?.let { bvnNumber ->
+        scanningOptions?.uniqueId?.let { bvnNumber ->
             val dialog = fetchingUserDB(scanningOptions?.themeOptions) {}
             getUser(bvnNumber) { userFound, user ->
                 dialog.dismiss()
@@ -538,7 +538,6 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
                 val intent = Intent()
                 intent.putExtra(ScannerConstants.DATA, list) // Add the read data to the intent.
-                intent.putExtra(ScannerConstants.CUSTOM_DATA, currentUser?.customObject?.toString())
                 setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
                 finish() // Close the current activity.
             }
@@ -734,11 +733,11 @@ internal class ScannerActivity : AppCompatActivity() {
             val file = File(path)
             localFileRefs.add(path)
             updateUserInDb(
-                scanningOptions?.bvnNumber!!,
+                scanningOptions?.uniqueId!!,
                 hashMapOf("fingerPrintLocalPath" to localFileRefs)
             )
             Log.d(ScannerActivity::class.simpleName, file.name)
-            uploadFileFromLocalToFirebaseStorage(scanningOptions?.bvnNumber!!, Uri.fromFile(file))
+            uploadFileFromLocalToFirebaseStorage(scanningOptions?.uniqueId!!, Uri.fromFile(file))
         }
     }
 
@@ -1285,46 +1284,37 @@ internal class ScannerActivity : AppCompatActivity() {
             }
         }
         val user = User(
-            scanningOptions?.bvnNumber ?: "",
-            "alskdfjlaf",
-            "nskjds",
-            scanningOptions?.phoneNumber ?: "",
-            "Coopvest",
-            "Agent",
-            if (scanningOptions?.scanningType == ScanningType.REGISTRATION) "Registration" else "Transaction",
+            uniqueId = scanningOptions?.uniqueId ?: "", // this is unique id used to identify user
+            getAndroidId(), // Android device ID this is also unique
+            userId = scanningOptions?.userId,
+            phoneNumber = scanningOptions?.phoneNumber ?: "",
+            scanningOptions?.bankProvider,
+            scanningOptions?.loginType,
+            if (scanningOptions?.scanningType == ScanningType.REGISTRATION) Constant.REGISTRATION else Constant.TRANSACTION,
             fingerprintVerificationStatus = readerStatus == ReaderStatus.FINGERS_VERIFICATION_SUCCESS,
-            1,
+            fingerPrintCount = localFileRefs.size,
             localFileRefs,
             uploadedFileRefs,
             fingerPrintSyncedOnCloud = false,
-            0,
-            Date(),
+            Date(), // Current date
             arrayListOf(location?.latitude, location?.longitude),
             data
         )
-        db.collection("users").document(scanningOptions?.bvnNumber!!).set(user)
-            .addOnSuccessListener {
-                currentUser = user
-                Log.d(ScannerActivity::class.simpleName, "Success")
-            }
-            .addOnFailureListener {
-                Log.e(ScannerActivity::class.simpleName, "Failed - ${it.message}")
-                it.printStackTrace()
-            }
+        scanningOptions?.uniqueId?.let { uniqueId ->
+            db.collection(Constant.USERS).document(uniqueId).set(user)
+                .addOnSuccessListener {
+                    currentUser = user
+                    Log.d(ScannerActivity::class.simpleName, "Success")
+                }
+                .addOnFailureListener {
+                    Log.e(ScannerActivity::class.simpleName, "Failed - ${it.message}")
+                    it.printStackTrace()
+                }
+        }
     }
 
-    private fun updateUserInDb(bvnNumber: String, map: HashMap<String, Any>) {
-        db.collection("users").document(bvnNumber).update(map)
-            .addOnSuccessListener {
-                Log.d(ScannerActivity::class.simpleName, "User update success")
-            }
-            .addOnFailureListener {
-                Log.e(ScannerActivity::class.simpleName, "User update failed ${it.message}")
-            }
-    }
-
-    fun updateCustomDataInDb(bvnNumber: String, map: HashMap<String, Any>) {
-        Firebase.firestore.collection("users").document(bvnNumber).update(map)
+    private fun updateUserInDb(uniqueId: String, map: HashMap<String, Any>) {
+        db.collection(Constant.USERS).document(uniqueId).update(map)
             .addOnSuccessListener {
                 Log.d(ScannerActivity::class.simpleName, "User update success")
             }
@@ -1333,17 +1323,52 @@ internal class ScannerActivity : AppCompatActivity() {
             }
     }
 
-    fun getUser(bvnNumber: String, callback: (Boolean, User?) -> Unit) {
-        Firebase.firestore.collection("users").document(bvnNumber).get().addOnSuccessListener {
+    fun updateCustomDataInDb(
+        uniqueId: String,
+        map: HashMap<String, Any>,
+        callback: (Boolean) -> Unit
+    ) {
+        Firebase.firestore.collection(Constant.USERS).document(uniqueId).update(map)
+            .addOnSuccessListener {
+                callback(true)
+                Log.d(ScannerActivity::class.simpleName, "User update success")
+            }
+            .addOnFailureListener {
+                callback(false)
+                Log.e(ScannerActivity::class.simpleName, "User update failed ${it.message}")
+            }
+    }
+
+    fun getUser(uniqueId: String, callback: (Boolean, User?) -> Unit) {
+        Firebase.firestore.collection("users").document(uniqueId).get().addOnSuccessListener {
             Log.d(ScannerActivity::class.simpleName, "User in db - $it")
             val user = it.toObject(User::class.java)
             callback(user != null, user)
-            Log.d(ScannerActivity::class.simpleName, user?.amount.toString())
         }.addOnFailureListener {
             callback(false, null)
             it.printStackTrace()
             Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
         }
+    }
+
+    fun getUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
+        Firebase.firestore.collection("users").whereEqualTo(key, value).get()
+            .addOnSuccessListener {
+                if (it.isEmpty || it.documents.isEmpty()) {
+                    callback(false, null)
+                } else {
+                    try {
+                        val user = it.documents[0].toObject(User::class.java)
+                        callback(user != null, user)
+                    } catch (e: Exception) {
+                        callback(false, null)
+                    }
+                }
+            }.addOnFailureListener {
+                callback(false, null)
+                it.printStackTrace()
+                Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
+            }
     }
 
     private fun uploadFileFromLocalToFirebaseStorage(bvnNumber: String, uri: Uri) {
@@ -1376,7 +1401,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun downloadFilesFromFirebaseStorage(callback: (Boolean) -> Unit) {
         val storageList = ArrayList<StorageReference>()
-        val storageListRef = storageRef.child("${scanningOptions?.bvnNumber!!}/").listAll()
+        val storageListRef = storageRef.child("${scanningOptions?.uniqueId!!}/").listAll()
         storageListRef.addOnSuccessListener {
             if (it.items.isNotEmpty()) {
                 it.items.forEach { reference ->
@@ -1410,7 +1435,7 @@ internal class ScannerActivity : AppCompatActivity() {
             val gsReference = storage.getReferenceFromUrl(
                 storageReference.toString(),
             )
-            val dirPath = filesDir.path + "/${scanningOptions?.bvnNumber!!}/"
+            val dirPath = filesDir.path + "/${scanningOptions?.uniqueId!!}/"
             val filePath = dirPath + createFileName() + index + "-ISO-Template.bin"
             val files = File(dirPath)
             files.mkdirs()
@@ -1445,7 +1470,7 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun checkUserHasFilesInLocalStorage(): Boolean {
-        val dirPath = filesDir.path + "/${scanningOptions?.bvnNumber!!}/"
+        val dirPath = filesDir.path + "/${scanningOptions?.uniqueId!!}/"
         val files = File(dirPath)
         return (files.isDirectory && !files.listFiles().isNullOrEmpty())
     }
@@ -1472,14 +1497,14 @@ internal class ScannerActivity : AppCompatActivity() {
             user?.apply {
                 if (localFileRefs.isNotEmpty()) {
                     localFileRefs.forEach {
-                        uploadFileFromLocalToFirebaseStorage(bvnNumber!!, Uri.fromFile(File(it)))
+                        uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(File(it)))
                     }
                 } else {
-                    val dirPath = filesDir.path + "/${bvnNumber}/"
+                    val dirPath = filesDir.path + "/${uniqueId}/"
                     val files = File(dirPath)
                     if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
                         files.listFiles()?.forEach {
-                            uploadFileFromLocalToFirebaseStorage(bvnNumber!!, Uri.fromFile(it))
+                            uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(it))
                         }
                     }
                 }
@@ -1497,7 +1522,7 @@ internal class ScannerActivity : AppCompatActivity() {
         val transaction = Transaction(
             scanningOptions?.amount,
             Date(),
-            scanningOptions?.bvnNumber ?: "",
+            scanningOptions?.uniqueId ?: "",
             arrayListOf(location?.latitude, location?.longitude),
             data
         )
@@ -1512,13 +1537,11 @@ internal class ScannerActivity : AppCompatActivity() {
             }
     }
 
-    /*#endregion*/
-    /*
-        internal class BroadCastReceiverGPS : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
+    private fun getAndroidId(): String {
+        return Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+    }
 
-            }
-        }*/
+    /*#endregion*/
 }
 
 

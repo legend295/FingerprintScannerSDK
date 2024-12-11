@@ -31,7 +31,7 @@
         android:imeOptions="actionNext"
         android:inputType="phone"
         android:maxLength="13"
-        android:text="1234567890"
+        android:text="9999999913"
         android:padding="10dp"
         app:layout_constraintTop_toBottomOf="@id/etBvnNumber" />
 

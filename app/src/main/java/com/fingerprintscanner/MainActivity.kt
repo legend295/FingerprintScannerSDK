@@ -10,6 +10,7 @@ import com.fingerprintscanner.utility.showFieldsDialog
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.scanner.activity.FingerprintScanner
 import com.scanner.utils.builder.ThemeOptions
+import com.scanner.utils.constants.Keys
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.ScanningType
 import org.json.JSONObject
@@ -64,10 +65,17 @@ class MainActivity : AppCompatActivity() {
         data.apply {
             put("pin", 1235)
         }
-        FingerprintScanner().updateCustomDataInDb("99999999912", data)
+        FingerprintScanner().updateCustomDataInDb("99999999913", data){}
 
-        FingerprintScanner().getUser("99999999912") { isSuccess, user ->
+        FingerprintScanner().getUser("99999999913") { isSuccess, user ->
             Log.d(MainActivity::class.simpleName, user.toString())
+            if (isSuccess) {
+
+            }
+        }
+
+        FingerprintScanner().getUserByPhone(Keys.PHONE_NUMBER,"9999999913") { isSuccess, user ->
+            Log.d(MainActivity::class.simpleName, "By Phone - ${user.toString()}")
             if (isSuccess) {
 
             }
@@ -87,9 +95,9 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (it.resultCode == RESULT_OK) {
                 val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
-                val customObject: JSONObject =
-                    (it.data?.getStringExtra(ScannerConstants.CUSTOM_DATA).toString()) as JSONObject
-                Log.d(MainActivity::class.simpleName, customObject.toString())
+//                val customObject: JSONObject =
+//                    (it.data?.getStringExtra(ScannerConstants.CUSTOM_DATA).toString()) as JSONObject
+//                Log.d(MainActivity::class.simpleName, customObject.toString())
                 val isVerified: Boolean? =
                     it.data?.getBooleanExtra(ScannerConstants.VERIFICATION_RESULT, false)
                 Log.d(MainActivity::class.simpleName, list?.size.toString())

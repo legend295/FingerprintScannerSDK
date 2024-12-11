@@ -11,15 +11,12 @@ import com.google.gson.Gson
 import com.scanner.model.User
 import com.scanner.utils.builder.BuilderOptions
 import com.scanner.utils.builder.ThemeOptions
+import com.scanner.utils.constants.Constant
 import com.scanner.utils.constants.Constant.SCANNING_OPTIONS
 import com.scanner.utils.enums.ScanningType
 import org.json.JSONObject
 
 class FingerprintScanner {
-
-    /* fun builder(): Builder {
-         return Builder()
-     }*/
 
     class Builder(val context: Context) {
         private val options: BuilderOptions = BuilderOptions()
@@ -31,7 +28,7 @@ class FingerprintScanner {
 
 
         fun setBvnNumber(bvnNumber: String): Builder {
-            options.bvnNumber = bvnNumber
+            options.uniqueId = bvnNumber
             return this
         }
 
@@ -50,6 +47,21 @@ class FingerprintScanner {
             return this
         }
 
+        fun setBankProvider(bankProviderName: String): Builder {
+            options.bankProvider = bankProviderName
+            return this
+        }
+
+        fun setLoginType(loginType: String): Builder {
+            options.loginType = loginType
+            return this
+        }
+
+        fun setUserId(userId: String): Builder {
+            options.userId = userId
+            return this
+        }
+
         fun setThemeOptions(themeOptions: ThemeOptions): Builder {
             options.themeOptions = themeOptions
             return this
@@ -60,10 +72,6 @@ class FingerprintScanner {
             return this
         }
 
-        /*  fun setFirebaseFireStore(firebaseFireStore: FirebaseFirestore): Builder {
-              options.firebaseFireStore = firebaseFireStore
-              return this
-          }*/
 
         fun start(
             activity: Activity,
@@ -84,8 +92,8 @@ class FingerprintScanner {
 
         private fun validate() {
             if (options.scanningType == null) throw NullPointerException("Scanning Type cannot be null")
-            if (options.bvnNumber == null) throw NullPointerException("Bvn number cannot be null")
-            require(options.bvnNumber!!.isNotEmpty()) { "Bvn number cannot be empty" }
+            if (options.uniqueId == null) throw NullPointerException("Bvn number cannot be null")
+            require(options.uniqueId!!.isNotEmpty()) { "Bvn number cannot be empty" }
             if (options.scanningType == ScanningType.REGISTRATION) {
                 if (options.phoneNumber == null) throw NullPointerException("Phone number cannot be null")
                 require(options.phoneNumber!!.isNotEmpty()) { "Phone number cannot be empty" }
@@ -97,8 +105,6 @@ class FingerprintScanner {
                     .isNullOrEmpty()
             ) throw NullPointerException("Encryption key cannot be null or empty")
             require(options.key?.trim()?.isNotEmpty() == true) { "Encryption key cannot be empty" }
-
-//            if (options.firebaseFireStore == null) throw NullPointerException("Firebase FireStore cannot be null")
         }
 
         private fun getIntent(activity: Activity?): Intent {
@@ -119,8 +125,20 @@ class FingerprintScanner {
         ScannerActivity().getUser(bvnNumber, callback)
     }
 
-    fun updateCustomDataInDb(bvnNumber: String, map: MutableMap<String, Any>) {
-        ScannerActivity().updateCustomDataInDb(bvnNumber, hashMapOf("customObject" to map))
+    fun getUserByPhone(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
+        ScannerActivity().getUserByKeyValue(key, value, callback)
+    }
+
+    fun updateCustomDataInDb(
+        uniqueId: String,
+        customObject: MutableMap<String, Any>,
+        callback: (Boolean) -> Unit
+    ) {
+        ScannerActivity().updateCustomDataInDb(
+            uniqueId,
+            hashMapOf(Constant.CUSTOM_OBJECT to customObject),
+            callback
+        )
     }
 
 }
