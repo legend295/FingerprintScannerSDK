@@ -125,7 +125,7 @@ class FingerprintScanner {
         ScannerActivity().getUser(bvnNumber, callback)
     }
 
-    fun getUserByPhone(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
+    fun queryUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
         ScannerActivity().getUserByKeyValue(key, value, callback)
     }
 
