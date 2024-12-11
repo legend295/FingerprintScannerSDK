@@ -1351,7 +1351,7 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
-    fun getUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
+    fun queryUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
         Firebase.firestore.collection("users").whereEqualTo(key, value).get()
             .addOnSuccessListener {
                 if (it.isEmpty || it.documents.isEmpty()) {

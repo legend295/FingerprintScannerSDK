@@ -74,7 +74,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        FingerprintScanner().getUserByPhone(Keys.PHONE_NUMBER,"9999999913") { isSuccess, user ->
+        FingerprintScanner().queryUserByKeyValue(Keys.PHONE_NUMBER,"9999999913") { isSuccess, user ->
             Log.d(MainActivity::class.simpleName, "By Phone - ${user.toString()}")
             if (isSuccess) {
 

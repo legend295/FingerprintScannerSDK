@@ -126,7 +126,7 @@ class FingerprintScanner {
     }
 
     fun queryUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
-        ScannerActivity().getUserByKeyValue(key, value, callback)
+        ScannerActivity().queryUserByKeyValue(key, value, callback)
     }
 
     fun updateCustomDataInDb(
