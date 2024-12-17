@@ -67,6 +67,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -327,11 +329,15 @@ internal class ScannerActivity : AppCompatActivity() {
                 dialog.dismiss()
                 currentUser = user
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
-                    if (userFound && user?.fingerPrintSyncedOnCloud == true) {
-                        handleMessageAndFinish("The user is already registered with entered BVN number. Please try with new BVN.")
-                    } else {
-                        saveUserToDB()
-                        initialize()
+                    val storageListRef =
+                        storageRef.child("${scanningOptions?.uniqueId!!}/").listAll()
+                    runBlocking {
+                        if (userFound && user?.fingerPrintSyncedOnCloud == true && storageListRef.await().items.size == 2) {
+                            handleMessageAndFinish("The user is already registered with entered Unique number. Please try with new BVN.")
+                        } else {
+                            saveUserToDB()
+                            initialize()
+                        }
                     }
                 } else {
                     if (userFound) {
@@ -657,6 +663,9 @@ internal class ScannerActivity : AppCompatActivity() {
 
                 ReaderStatus.FINGERS_READ_FAILED -> {}
                 ReaderStatus.SESSION_CLOSED -> {
+                    runOnUiThread {
+                        getDialog()?.dismiss()
+                    }
                     setStartButtonMessage("Retry", true)
                     setMessage(getString(R.string.session_closed_retry))
                 }
@@ -735,9 +744,13 @@ internal class ScannerActivity : AppCompatActivity() {
             updateUserInDb(
                 scanningOptions?.uniqueId!!,
                 hashMapOf("fingerPrintLocalPath" to localFileRefs)
-            )
+            ) {}
             Log.d(ScannerActivity::class.simpleName, file.name)
-            uploadFileFromLocalToFirebaseStorage(scanningOptions?.uniqueId!!, Uri.fromFile(file))
+            if (file.exists())
+                uploadFileFromLocalToFirebaseStorage(
+                    scanningOptions?.uniqueId!!,
+                    Uri.fromFile(file)
+                )
         }
     }
 
@@ -1313,12 +1326,18 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateUserInDb(uniqueId: String, map: HashMap<String, Any>) {
+    private fun updateUserInDb(
+        uniqueId: String,
+        map: HashMap<String, Any>,
+        callback: (Boolean) -> Unit
+    ) {
         db.collection(Constant.USERS).document(uniqueId).update(map)
             .addOnSuccessListener {
+                callback(true)
                 Log.d(ScannerActivity::class.simpleName, "User update success")
             }
             .addOnFailureListener {
+                callback(false)
                 Log.e(ScannerActivity::class.simpleName, "User update failed ${it.message}")
             }
     }
@@ -1381,14 +1400,17 @@ internal class ScannerActivity : AppCompatActivity() {
             Log.d(ScannerActivity::class.simpleName, "File upload success")
             uploadedFileRefs.add(fileRef.path)
             if (uploadedFileRefs.size == 2) {
-                uploadedFileRefs.clear()
                 updateUserInDb(
                     bvnNumber,
                     hashMapOf(
                         "fingerPrintSyncedOnCloud" to true,
-                        "fingerPrintCloudPath" to uploadedFileRefs
+                        "fingerPrintCloudPath" to uploadedFileRefs,
+                        "fingerPrintCount" to localFileRefs.size
                     )
-                )
+                ) {
+                    uploadedFileRefs.clear()
+                }
+
             }
             Log.d(
                 ScannerActivity::class.simpleName,
