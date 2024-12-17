@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
         tvRegistration.setOnClickListener {
             sheet =
                 showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
-                    FingerprintScanner.Builder(this).setBvnNumber(bvnNumber)
+                    FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
                         .setPhoneNumber(phoneNumber)
                         .setScanningType(ScanningType.REGISTRATION)
                         .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
 
         tvVerification.setOnClickListener {
             sheet = showFieldsDialog(ScanningType.VERIFICATION) { bvnNumber, _, _, amount, key ->
-                FingerprintScanner.Builder(this).setBvnNumber(bvnNumber)
+                FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
                     .setAmount(amount.toInt())
                     .setScanningType(ScanningType.VERIFICATION)
                     .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")

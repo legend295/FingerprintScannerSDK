@@ -27,8 +27,8 @@ class FingerprintScanner {
         }
 
 
-        fun setBvnNumber(bvnNumber: String): Builder {
-            options.uniqueId = bvnNumber
+        fun setUniqueId(uniqueId: String): Builder {
+            options.uniqueId = uniqueId
             return this
         }
 
