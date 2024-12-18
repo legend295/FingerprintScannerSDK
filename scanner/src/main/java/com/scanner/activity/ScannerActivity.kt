@@ -148,7 +148,7 @@ internal class ScannerActivity : AppCompatActivity() {
             if (isSuccess) {
                 it?.let {
                     userDocuments.addAll(it.documents)
-                    uploadFiles(this,userDocuments) {_,_->}
+                    uploadFiles(this, userDocuments) { _, _ -> }
                 }
             }
         } //65112583554
@@ -1602,10 +1602,14 @@ internal class ScannerActivity : AppCompatActivity() {
             }
     }
 
-    fun uploadFiles(context: Context,userDocuments: ArrayList<DocumentSnapshot>, callback: (Boolean,String) -> Unit) {
+    fun uploadFiles(
+        context: Context,
+        userDocuments: ArrayList<DocumentSnapshot>,
+        callback: (Boolean, String) -> Unit
+    ) {
         if (userDocuments.isEmpty()) {
             // there are no files to upload return user with false callback
-            callback(false,"No files found.")
+            callback(false, "No files found.")
             return
         }
         userDocuments.forEachIndexed { _, userSnapshot ->
@@ -1621,8 +1625,11 @@ internal class ScannerActivity : AppCompatActivity() {
                                 uploadFileFromLocalToFirebaseStorage(
                                     user.uniqueId!!,
                                     Uri.fromFile(File(it)),
-                                    ){isSuccess->
-                                    callback(isSuccess, if (isSuccess)"Files uploaded successfully" else "Files not uploaded.")
+                                ) { isSuccess ->
+                                    callback(
+                                        isSuccess,
+                                        if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
+                                    )
                                 }
                             }
                         } else {
@@ -1633,8 +1640,11 @@ internal class ScannerActivity : AppCompatActivity() {
                                     uploadFileFromLocalToFirebaseStorage(
                                         user.uniqueId!!,
                                         Uri.fromFile(it)
-                                    ){isSuccess->
-                                        callback(isSuccess, if (isSuccess)"Files uploaded successfully" else "Files not uploaded.")
+                                    ) { isSuccess ->
+                                        callback(
+                                            isSuccess,
+                                            if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
+                                        )
                                     }
                                 } ?: run {
                                     callback(false, "Files on local storage not found.")
@@ -1648,11 +1658,11 @@ internal class ScannerActivity : AppCompatActivity() {
                                 hashMapOf(
                                     "fingerPrintSyncedOnCloud" to true
                                 )
-                            ) {
-                                callback(false, "Files already uploaded.")
+                            ) { isSuccess ->
+                                callback(isSuccess, "Files already uploaded.")
                             }
 
-                        }?:run {
+                        } ?: run {
                             callback(false, "Files already uploaded.")
                         }
 
@@ -1694,7 +1704,7 @@ internal class ScannerActivity : AppCompatActivity() {
         return Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
     }
 
-    fun doesFileExistsInLocalStorage(context: Context,uniqueId: String): Boolean {
+    fun doesFileExistsInLocalStorage(context: Context, uniqueId: String): Boolean {
         val dirPath = context.filesDir.path + "/${uniqueId}/"
         val files = File(dirPath)
         return files.isDirectory && !files.listFiles().isNullOrEmpty()
