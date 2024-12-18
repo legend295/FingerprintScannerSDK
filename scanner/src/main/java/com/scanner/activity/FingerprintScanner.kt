@@ -142,12 +142,12 @@ class FingerprintScanner {
            ScannerActivity().getUserFromCacheByKeyValue(key, value, querySnapShot)
        }
    */
-    fun uploadFiles(context: Context,userDocuments: ArrayList<DocumentSnapshot>, callback: (Boolean,String) -> Unit) {
-        ScannerActivity().uploadFiles(context,userDocuments, callback)
+    fun uploadFiles(context: Context, user: User?, callback: (Boolean, String) -> Unit) {
+        ScannerActivity().uploadFiles(context, user, callback)
     }
 
-    fun doesFileExistsInLocalStorage(context: Context,uniqueId: String): Boolean =
-        ScannerActivity().doesFileExistsInLocalStorage(context,uniqueId)
+    fun doesFileExistsInLocalStorage(context: Context, uniqueId: String): Boolean =
+        ScannerActivity().doesFileExistsInLocalStorage(context, uniqueId)
 
     fun queryUserByKeyValue(
         queryMap: HashMap<String, Any>,

@@ -148,7 +148,7 @@ internal class ScannerActivity : AppCompatActivity() {
             if (isSuccess) {
                 it?.let {
                     userDocuments.addAll(it.documents)
-                    uploadFiles(this, userDocuments) { _, _ -> }
+                    userDocuments.uploadFiles()
                 }
             }
         } //65112583554
@@ -1602,76 +1602,75 @@ internal class ScannerActivity : AppCompatActivity() {
             }
     }
 
-    fun uploadFiles(
-        context: Context,
-        userDocuments: ArrayList<DocumentSnapshot>,
-        callback: (Boolean, String) -> Unit
-    ) {
-        if (userDocuments.isEmpty()) {
-            // there are no files to upload return user with false callback
-            callback(false, "No files found.")
-            return
-        }
-        userDocuments.forEachIndexed { _, userSnapshot ->
+    private fun ArrayList<DocumentSnapshot>.uploadFiles() {
+        forEachIndexed { _, userSnapshot ->
             val user = userSnapshot.toObject(User::class.java)
             Log.d(ScannerApp::class.simpleName, "User in db - $user")
             user?.apply {
-                val storageListRef =
-                    storageRef.child("${user.uniqueId!!}/").listAll()
-                runBlocking {
-                    if (storageListRef.await().items.isEmpty()) {
-                        if (localFileRefs.isNotEmpty()) {
-                            localFileRefs.forEach {
-                                uploadFileFromLocalToFirebaseStorage(
-                                    user.uniqueId!!,
-                                    Uri.fromFile(File(it)),
-                                ) { isSuccess ->
-                                    callback(
-                                        isSuccess,
-                                        if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
-                                    )
-                                }
-                            }
-                        } else {
-                            val dirPath = context.filesDir.path + "/${user.uniqueId}/"
-                            val files = File(dirPath)
-                            if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
-                                files.listFiles()?.forEach {
-                                    uploadFileFromLocalToFirebaseStorage(
-                                        user.uniqueId!!,
-                                        Uri.fromFile(it)
-                                    ) { isSuccess ->
-                                        callback(
-                                            isSuccess,
-                                            if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
-                                        )
-                                    }
-                                } ?: run {
-                                    callback(false, "Files on local storage not found.")
-                                }
-                            } else callback(false, "Files on local storage not found.")
+                if (localFileRefs.isNotEmpty()) {
+                    localFileRefs.forEach {
+                        uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(File(it))){}
+                    }
+                } else {
+                    val dirPath = filesDir.path + "/${uniqueId}/"
+                    val files = File(dirPath)
+                    if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+                        files.listFiles()?.forEach {
+                            uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(it)){}
                         }
-                    } else {
-                        user.uniqueId?.let {
-                            updateUserInDb(
-                                it,
-                                hashMapOf(
-                                    "fingerPrintSyncedOnCloud" to true
-                                )
-                            ) { isSuccess ->
-                                callback(isSuccess, "Files already uploaded.")
-                            }
-
-                        } ?: run {
-                            callback(false, "Files already uploaded.")
-                        }
-
                     }
                 }
-
-            } ?: run {
-                callback(false, "User not found.")
             }
+        }
+    }
+
+    fun uploadFiles(
+        context: Context,
+        user: User?,
+        callback: (Boolean, String) -> Unit
+    ) {
+        user?.apply {
+            val storageListRef =
+                storageRef.child("${user.uniqueId!!}/").listAll()
+            runBlocking {
+                if (storageListRef.await().items.isEmpty()) {
+                    val dirPath = context.filesDir.path + "/${user.uniqueId}/"
+                    val files = File(dirPath)
+                    if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+                        files.listFiles()?.forEach {
+                            uploadFileFromLocalToFirebaseStorage(
+                                user.uniqueId!!,
+                                Uri.fromFile(it)
+                            ) { isSuccess ->
+                                callback(
+                                    isSuccess,
+                                    if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
+                                )
+                            }
+                        } ?: run {
+                            callback(false, "Files on local storage not found.")
+                        }
+                    } else callback(false, "Files on local storage not found.")
+                } else {
+                    user.uniqueId?.let {
+                        updateUserInDb(
+                            it,
+                            hashMapOf(
+                                "fingerPrintSyncedOnCloud" to true
+                            )
+                        ) { isSuccess ->
+                            callback(isSuccess, "Files already uploaded.")
+                        }
+
+                    } ?: run {
+                        callback(false, "Files already uploaded.")
+                    }
+
+                }
+            }
+
+        } ?: run {
+            callback(false, "User not found.")
         }
     }
 

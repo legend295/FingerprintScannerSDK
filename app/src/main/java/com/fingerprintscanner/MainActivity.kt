@@ -52,30 +52,28 @@ class MainActivity : AppCompatActivity() {
                 }*/
             if (FingerprintScanner().doesFileExistsInLocalStorage(this, "99999999914")) {
                 println("Files found in local storage")
-                FingerprintScanner().queryUserByKeyValue(
+                FingerprintScanner().getUser("99999999914") { isSuccess, user ->
+                    if (isSuccess && user?.fingerPrintSyncedOnCloud == false) {
+                        Log.d(MainActivity::class.simpleName, "By Unique Id - $user")
+                        FingerprintScanner().uploadFiles(
+                            this,
+                            user
+                        ) { _, msg ->
+                            println("MainActivity File upload - $msg")
+                        }
+                    } else {
+                        println("User not found")
+                    }
+                }
+                /*FingerprintScanner().queryUserByKeyValue(
                     hashMapOf(
                         Keys.UNIQUE_ID to "99999999914",
                         FINGER_PRINT_SYNCED_ON_CLOUD to false
                     ),
                     null
                 ) { isSuccess, users ->
-                    if (isSuccess) {
-                        Log.d(MainActivity::class.simpleName, "By Unique Id - ${users.toString()}")
-                        if (!users?.documents.isNullOrEmpty()) {
-                            println("Upload files")
-                            FingerprintScanner().uploadFiles(
-                                this,
-                                java.util.ArrayList(
-                                    users?.documents ?: ArrayList()
-                                )
-                            ) { _, msg ->
-                                println("MainActivity File upload - $msg")
-                            }
-                        }
-                    } else {
-                        println("User not found")
-                    }
-                }
+
+                }*/
             } else println("Files not found in local storage")
 
             /*FingerprintScanner().getUser("99999999914",) { isSuccess, users ->
