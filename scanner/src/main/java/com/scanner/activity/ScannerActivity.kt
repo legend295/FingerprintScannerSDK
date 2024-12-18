@@ -30,6 +30,8 @@ import androidx.core.content.ContextCompat
 import com.github.legend295.fingerprintscanner.R
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.Filter
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
@@ -49,6 +51,10 @@ import com.scanner.utils.ReaderStatus
 import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.Constant
 import com.scanner.utils.constants.Constant.FINGER_PRINT_READ_INFO
+import com.scanner.utils.constants.Keys.USER_COLLECTION_PATH
+import com.scanner.utils.constants.Keys.FINGER_PRINT_SYNCED_ON_CLOUD
+import com.scanner.utils.constants.Keys.TRANSACTION_COLLECTION_PATH
+import com.scanner.utils.constants.Keys.UNIQUE_ID
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
@@ -137,7 +143,15 @@ internal class ScannerActivity : AppCompatActivity() {
         verificationDialog = null
 
 
-        getUser() //65112583554
+        getUserFromCache { it, isSuccess ->
+            val userDocuments = ArrayList<DocumentSnapshot>()
+            if (isSuccess) {
+                it?.let {
+                    userDocuments.addAll(it.documents)
+                    uploadFiles(this,userDocuments) {_,_->}
+                }
+            }
+        } //65112583554
 
         //Find views by id
         tvStatus = findViewById(R.id.tvStatus)
@@ -750,7 +764,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 uploadFileFromLocalToFirebaseStorage(
                     scanningOptions?.uniqueId!!,
                     Uri.fromFile(file)
-                )
+                ) {}
         }
     }
 
@@ -1359,19 +1373,53 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     fun getUser(uniqueId: String, callback: (Boolean, User?) -> Unit) {
-        Firebase.firestore.collection("users").document(uniqueId).get().addOnSuccessListener {
-            Log.d(ScannerActivity::class.simpleName, "User in db - $it")
-            val user = it.toObject(User::class.java)
-            callback(user != null, user)
-        }.addOnFailureListener {
-            callback(false, null)
-            it.printStackTrace()
-            Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
-        }
+        Firebase.firestore.collection(USER_COLLECTION_PATH).document(uniqueId).get()
+            .addOnSuccessListener {
+                Log.d(ScannerActivity::class.simpleName, "User in db - $it")
+                val user = it.toObject(User::class.java)
+                callback(user != null, user)
+            }.addOnFailureListener {
+                callback(false, null)
+                it.printStackTrace()
+                Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
+            }
     }
 
-    fun queryUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
-        Firebase.firestore.collection("users").whereEqualTo(key, value).get()
+    fun queryUserByKeyValue(
+        queryMap: HashMap<String, Any>,
+        source: com.scanner.utils.constants.Source?,
+        callback: (Boolean, QuerySnapshot?) -> Unit
+    ) {
+        // Create a list of filters dynamically
+        val filterList = mutableListOf<Filter>()
+        for ((key, value) in queryMap) {
+            filterList.add(Filter.equalTo(key, value))
+        }
+        // Combine all filters using Filter.and()
+        val combinedFilter = Filter.and(*filterList.toTypedArray())
+        val accessSource =
+            if (source == null) Source.DEFAULT else if (source == com.scanner.utils.constants.Source.ONLINE) Source.SERVER else Source.CACHE
+        Firebase.firestore.collection(USER_COLLECTION_PATH).where(combinedFilter).get(accessSource)
+            .addOnSuccessListener {
+                /*if (it?.documents.isNullOrEmpty()) {
+                    callback(false, null)
+                } else {
+                    try {
+                        callback(true, java.util.ArrayList(it.documents))
+                    } catch (e: Exception) {
+                        callback(false, null)
+                    }
+                }*/
+                callback(true, it)
+            }.addOnFailureListener {
+                callback(false, null)
+                it.printStackTrace()
+                Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
+            }
+    }
+
+    /*fun queryUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
+        Firebase.firestore.collection(USER_COLLECTION_PATH).whereEqualTo(key, value).get()
             .addOnSuccessListener {
                 if (it.isEmpty || it.documents.isEmpty()) {
                     callback(false, null)
@@ -1388,9 +1436,13 @@ internal class ScannerActivity : AppCompatActivity() {
                 it.printStackTrace()
                 Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
             }
-    }
+    }*/
 
-    private fun uploadFileFromLocalToFirebaseStorage(bvnNumber: String, uri: Uri) {
+    private fun uploadFileFromLocalToFirebaseStorage(
+        bvnNumber: String,
+        uri: Uri,
+        callback: (Boolean) -> Unit
+    ) {
         val fileRef = storageRef.child("${bvnNumber}/${uri.lastPathSegment}")
         val uploadTask = fileRef.putFile(uri)
         uploadTask.addOnProgressListener {
@@ -1409,8 +1461,8 @@ internal class ScannerActivity : AppCompatActivity() {
                     )
                 ) {
                     uploadedFileRefs.clear()
+                    callback(it)
                 }
-
             }
             Log.d(
                 ScannerActivity::class.simpleName,
@@ -1418,6 +1470,7 @@ internal class ScannerActivity : AppCompatActivity() {
             )
         }.addOnFailureListener {
             Log.e(ScannerActivity::class.simpleName, "File upload failed")
+            callback(false)
         }
     }
 
@@ -1499,37 +1552,115 @@ internal class ScannerActivity : AppCompatActivity() {
 
     /*#region upload files which are not uploaded*/
 
-    private fun getUser() {
+    private fun getUserFromCache(querySnapShot: (QuerySnapshot?, Boolean) -> Unit) {
+        // set source cache so that user will be fetched from local firebase cache
         val source = Source.CACHE
-        val userDocuments = ArrayList<DocumentSnapshot>()
-        db.collection("users").whereEqualTo("fingerPrintSyncedOnCloud", false).get(source)
+        db.collection(USER_COLLECTION_PATH).whereEqualTo(FINGER_PRINT_SYNCED_ON_CLOUD, false)
+            .get(source)
             .addOnSuccessListener {
-                userDocuments.addAll(it.documents)
-                userDocuments.uploadFiles()
+                querySnapShot(it, true)
             }.addOnFailureListener {
                 it.printStackTrace()
                 Log.e(ScannerApp::class.simpleName, "User fetch failed ${it.message}")
+                querySnapShot(null, false)
             }
     }
 
-    private fun ArrayList<DocumentSnapshot>.uploadFiles() {
-        forEachIndexed { _, userSnapshot ->
+    fun getUserFromCacheByUniqueId(
+        uniqueId: String,
+        querySnapShot: (QuerySnapshot?, Boolean) -> Unit
+    ) {
+        // set source cache so that user will be fetched from local firebase cache
+        db.collection(USER_COLLECTION_PATH)
+            .whereEqualTo(UNIQUE_ID, uniqueId)
+            .whereEqualTo(FINGER_PRINT_SYNCED_ON_CLOUD, false)
+            .get(Source.CACHE)
+            .addOnSuccessListener {
+                querySnapShot(it, true)
+            }.addOnFailureListener {
+                it.printStackTrace()
+                Log.e(ScannerApp::class.simpleName, "User fetch failed ${it.message}")
+                querySnapShot(null, false)
+            }
+    }
+
+    fun getUserFromCacheByKeyValue(
+        key: String,
+        value: Any,
+        querySnapShot: (QuerySnapshot?, Boolean) -> Unit
+    ) {
+        // set source cache so that user will be fetched from local firebase cache
+        val source = Source.CACHE
+        db.collection(USER_COLLECTION_PATH).whereEqualTo(key, value)
+            .get(source)
+            .addOnSuccessListener {
+                querySnapShot(it, true)
+            }.addOnFailureListener {
+                it.printStackTrace()
+                Log.e(ScannerApp::class.simpleName, "User fetch failed ${it.message}")
+                querySnapShot(null, false)
+            }
+    }
+
+    fun uploadFiles(context: Context,userDocuments: ArrayList<DocumentSnapshot>, callback: (Boolean,String) -> Unit) {
+        if (userDocuments.isEmpty()) {
+            // there are no files to upload return user with false callback
+            callback(false,"No files found.")
+            return
+        }
+        userDocuments.forEachIndexed { _, userSnapshot ->
             val user = userSnapshot.toObject(User::class.java)
             Log.d(ScannerApp::class.simpleName, "User in db - $user")
             user?.apply {
-                if (localFileRefs.isNotEmpty()) {
-                    localFileRefs.forEach {
-                        uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(File(it)))
-                    }
-                } else {
-                    val dirPath = filesDir.path + "/${uniqueId}/"
-                    val files = File(dirPath)
-                    if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
-                        files.listFiles()?.forEach {
-                            uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(it))
+                val storageListRef =
+                    storageRef.child("${user.uniqueId!!}/").listAll()
+                runBlocking {
+                    if (storageListRef.await().items.isEmpty()) {
+                        if (localFileRefs.isNotEmpty()) {
+                            localFileRefs.forEach {
+                                uploadFileFromLocalToFirebaseStorage(
+                                    user.uniqueId!!,
+                                    Uri.fromFile(File(it)),
+                                    ){isSuccess->
+                                    callback(isSuccess, if (isSuccess)"Files uploaded successfully" else "Files not uploaded.")
+                                }
+                            }
+                        } else {
+                            val dirPath = context.filesDir.path + "/${user.uniqueId}/"
+                            val files = File(dirPath)
+                            if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+                                files.listFiles()?.forEach {
+                                    uploadFileFromLocalToFirebaseStorage(
+                                        user.uniqueId!!,
+                                        Uri.fromFile(it)
+                                    ){isSuccess->
+                                        callback(isSuccess, if (isSuccess)"Files uploaded successfully" else "Files not uploaded.")
+                                    }
+                                } ?: run {
+                                    callback(false, "Files on local storage not found.")
+                                }
+                            } else callback(false, "Files on local storage not found.")
                         }
+                    } else {
+                        user.uniqueId?.let {
+                            updateUserInDb(
+                                it,
+                                hashMapOf(
+                                    "fingerPrintSyncedOnCloud" to true
+                                )
+                            ) {
+                                callback(false, "Files already uploaded.")
+                            }
+
+                        }?:run {
+                            callback(false, "Files already uploaded.")
+                        }
+
                     }
                 }
+
+            } ?: run {
+                callback(false, "User not found.")
             }
         }
     }
@@ -1548,7 +1679,7 @@ internal class ScannerActivity : AppCompatActivity() {
             arrayListOf(location?.latitude, location?.longitude),
             data
         )
-        db.collection("transaction")/*.document(scanningOptions?.bvnNumber!!).collection("${Date()}")*/
+        db.collection(TRANSACTION_COLLECTION_PATH)/*.document(scanningOptions?.bvnNumber!!).collection("${Date()}")*/
             .document().set(transaction)
             .addOnSuccessListener {
                 Log.d(ScannerActivity::class.simpleName, "Transaction save Success")
@@ -1561,6 +1692,12 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun getAndroidId(): String {
         return Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+    }
+
+    fun doesFileExistsInLocalStorage(context: Context,uniqueId: String): Boolean {
+        val dirPath = context.filesDir.path + "/${uniqueId}/"
+        val files = File(dirPath)
+        return files.isDirectory && !files.listFiles().isNullOrEmpty()
     }
 
     /*#endregion*/

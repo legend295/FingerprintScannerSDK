@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.fragment.app.Fragment
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.gson.Gson
 import com.scanner.model.User
 import com.scanner.utils.builder.BuilderOptions
@@ -125,8 +127,34 @@ class FingerprintScanner {
         ScannerActivity().getUser(bvnNumber, callback)
     }
 
-    fun queryUserByKeyValue(key: String, value: Any, callback: (Boolean, User?) -> Unit) {
-        ScannerActivity().queryUserByKeyValue(key, value, callback)
+    /*fun getUserFromCache(
+        uniqueId: String,
+        querySnapShot: (QuerySnapshot?, isSuccess: Boolean) -> Unit
+    ) {
+        ScannerActivity().getUserFromCacheByUniqueId(uniqueId, querySnapShot)
+    }
+*/
+    /*   fun getUserFromCacheByKeyValue(
+           key: String,
+           value: Any,
+           querySnapShot: (QuerySnapshot?, Boolean) -> Unit
+       ) {
+           ScannerActivity().getUserFromCacheByKeyValue(key, value, querySnapShot)
+       }
+   */
+    fun uploadFiles(context: Context,userDocuments: ArrayList<DocumentSnapshot>, callback: (Boolean,String) -> Unit) {
+        ScannerActivity().uploadFiles(context,userDocuments, callback)
+    }
+
+    fun doesFileExistsInLocalStorage(context: Context,uniqueId: String): Boolean =
+        ScannerActivity().doesFileExistsInLocalStorage(context,uniqueId)
+
+    fun queryUserByKeyValue(
+        queryMap: HashMap<String, Any>,
+        source: com.scanner.utils.constants.Source?,
+        callback: (Boolean, users: QuerySnapshot?) -> Unit
+    ) {
+        ScannerActivity().queryUserByKeyValue(queryMap, source, callback)
     }
 
     fun updateCustomDataInDb(
