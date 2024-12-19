@@ -118,7 +118,9 @@ internal class ScannerActivity : AppCompatActivity() {
     private val storage = Firebase.storage
     private val storageRef = storage.reference
     private val uploadedFileRefs = ArrayList<String>()
+    private val uploadedFileRefsCache = ArrayList<String>()
     private val localFileRefs = ArrayList<String>()
+    private val localFileRefsCache = ArrayList<String>()
 
     //    var textResults: TextView? = null
     private var doWeNeedToReinitialize = true
@@ -129,6 +131,11 @@ internal class ScannerActivity : AppCompatActivity() {
     private var timer: CountDownTimer? = null
     private var alertDialog: AlertDialog? = null
     private var currentUser: User? = null
+
+    // variable handled to check if both fingers are scanned successfully
+    // sometimes only one fingerprint get scanned and reader show successfully scanned. So, to solve this issue we are using this variable
+    private var areBothFingerprintScannedSuccessfully = HashMap<Int, Boolean>()
+    private var fingerprintFiles = HashMap<Int, File>()
 
     companion object {
         var location: LatLng? = null
@@ -188,6 +195,8 @@ internal class ScannerActivity : AppCompatActivity() {
             fingerprintHelper = ScannerApp.getInstance().fingerprintHelper
         }
 
+        areBothFingerprintScannedSuccessfully.clear()
+        fingerprintFiles.clear()
         fingerprintHelper?.setSessionHelper(sessionHelper = onSessionChanges)
         fingerprintHelper?.setFingerprintListener(fingerprintListener = fingerprintListener)
         fingerprintHelper?.setListOfTemplate(listOfTemplate = listOfTemplate)
@@ -431,6 +440,7 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
+
     /**
      * Initializes the fingerprint helper within a coroutine.
      *
@@ -579,6 +589,11 @@ internal class ScannerActivity : AppCompatActivity() {
                 handleCancelButtonsVisibility(isVisible = true) // Ensure cancel buttons are visible for a possible cancel action.
                 setStartButtonMessage("", isVisible = false) // Hide the start button.
                 resetImages() // Reset any fingerprint images or related visuals.
+                scanningOptions?.uniqueId?.let {
+                    deleteFiles(it) { success ->
+                        println("File Delete on Low finger quality ------ $success")
+                    }
+                }
                 fingerprintHelper?.scanAndExtract() // scan and extract again
             }
 
@@ -711,61 +726,6 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Implementation of OnFileSavedListener interface with custom handling for success and failure scenarios in file saving operations.
-     *
-     * This listener provides three overridden methods:
-     * - onSuccess: Called when a file is successfully saved. It logs the file name and adds the file to a list.
-     * - onBitmapSaveSuccess: Similar to onSuccess but specifically for bitmap save operations. It updates UI elements (image views) on the main thread based on the reader number.
-     * - onFailure: Called when there's an exception during the file saving process, and logs the error.
-     *
-     * Note: This implementation assumes the presence of 'list', 'ivScannerLeft', and 'ivScannerRight' which must be defined in the outer scope of this listener.
-     * 'list' should be a mutable collection capable of adding File objects.
-     * 'ivScannerLeft' and 'ivScannerRight' are image view references that should be nullable to handle UI updates gracefully.
-     * Proper error handling and UI thread handling (via runOnUiThread) are demonstrated for robustness.
-     */
-
-    private fun onFileSavedListener(list: ArrayList<File>) = object : OnFileSavedListener {
-        override fun onSuccess(path: String, readerNo: Int) {
-            val file = File(path)
-            Log.d(ScannerActivity::class.simpleName, file.name)
-            /*if (list.size >= 2)
-                list.clear()*/
-            list.add(file)
-            Log.d(
-                ScannerActivity::class.simpleName,
-                "onFileSavedListener::onSuccess - List size -> ${list.size}"
-            )
-        }
-
-        override fun onBitmapSaveSuccess(path: String, readerNo: Int) {
-            val file = File(path)
-            Log.d(ScannerActivity::class.simpleName, file.name)
-            runOnUiThread {
-                if (readerNo == 0) {
-                    ivScannerLeft?.setImageURI(Uri.fromFile(file))
-                } else ivScannerRight?.setImageURI(Uri.fromFile(file))
-            }
-        }
-
-        override fun onFailure(e: Exception) {
-            e.printStackTrace()
-        }
-
-        override fun onTemplateSaveSuccess(path: String, readerNo: Int) {
-            val file = File(path)
-            localFileRefs.add(path)
-            updateUserInDb(
-                scanningOptions?.uniqueId!!,
-                hashMapOf("fingerPrintLocalPath" to localFileRefs)
-            ) {}
-            Log.d(ScannerActivity::class.simpleName, file.name)
-            uploadFileFromLocalToFirebaseStorage(
-                scanningOptions?.uniqueId!!,
-                Uri.fromFile(file)
-            ) {}
-        }
-    }
 
     /**
      * Updates the text message displayed on a TextView designated for status updates on the UI thread.
@@ -836,6 +796,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        alertDialog = null
         enableLowPowerMode()
     }
 
@@ -1052,6 +1013,69 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Implementation of OnFileSavedListener interface with custom handling for success and failure scenarios in file saving operations.
+     *
+     * This listener provides three overridden methods:
+     * - onSuccess: Called when a file is successfully saved. It logs the file name and adds the file to a list.
+     * - onBitmapSaveSuccess: Similar to onSuccess but specifically for bitmap save operations. It updates UI elements (image views) on the main thread based on the reader number.
+     * - onFailure: Called when there's an exception during the file saving process, and logs the error.
+     *
+     * Note: This implementation assumes the presence of 'list', 'ivScannerLeft', and 'ivScannerRight' which must be defined in the outer scope of this listener.
+     * 'list' should be a mutable collection capable of adding File objects.
+     * 'ivScannerLeft' and 'ivScannerRight' are image view references that should be nullable to handle UI updates gracefully.
+     * Proper error handling and UI thread handling (via runOnUiThread) are demonstrated for robustness.
+     */
+
+    private fun onFileSavedListener(list: ArrayList<File>) = object : OnFileSavedListener {
+        override fun onSuccess(path: String, readerNo: Int) {
+            val file = File(path)
+            Log.d(ScannerActivity::class.simpleName, file.name)
+            /*if (list.size >= 2)
+                list.clear()*/
+            list.add(file)
+            Log.d(
+                ScannerActivity::class.simpleName,
+                "onFileSavedListener::onSuccess - List size -> ${list.size}"
+            )
+        }
+
+        override fun onBitmapSaveSuccess(path: String, readerNo: Int) {
+            val file = File(path)
+            Log.d(ScannerActivity::class.simpleName, file.name)
+            runOnUiThread {
+                if (readerNo == 0) {
+                    ivScannerLeft?.setImageURI(Uri.fromFile(file))
+                } else ivScannerRight?.setImageURI(Uri.fromFile(file))
+            }
+        }
+
+        override fun onFailure(e: Exception) {
+            e.printStackTrace()
+        }
+
+        override fun onTemplateSaveSuccess(path: String, readerNo: Int) {
+            println("onTemplateSaveSuccess ---------------- reader no $readerNo------- $path")
+            val file = File(path)
+            localFileRefs.add(path)
+            // cross check if files size is 2 or greater then 2
+            // if yes then clear list so that files will not get upload more than 2
+            if (fingerprintFiles.size >= 2) fingerprintFiles.clear()
+            fingerprintFiles[readerNo] = file
+            updateUserInDb(
+                scanningOptions?.uniqueId!!,
+                hashMapOf("fingerPrintLocalPath" to localFileRefs)
+            ) {}
+            println("uploadTemplates ---------------- File size ${fingerprintFiles.size}")
+            Log.d(ScannerActivity::class.simpleName, file.name)
+            uploadFileFromLocalToFirebaseStorage(
+                scanningOptions?.uniqueId!!,
+                Uri.fromFile(file)
+            ) {}
+            println("onTemplateSaveSuccess ---------------- reader no $readerNo ------- File size ${fingerprintFiles.size}")
+        }
+    }
+
     private val fingerprintListener = object : FingerprintListener {
         override fun showResult(
             image: ByteArray?,
@@ -1080,16 +1104,26 @@ internal class ScannerActivity : AppCompatActivity() {
             readerNo: Int,
             previewListenerType: PreviewListenerType
         ) {
-            status?.handle(previewListenerType)
+            status?.handle(previewListenerType, readerNo)
         }
 
         override fun extractionResult(status: NBBiometricsStatus?, readerNo: Int) {
             if (status == NBBiometricsStatus.BAD_QUALITY) {
+                areBothFingerprintScannedSuccessfully.clear()
                 list.clear()
+                fingerprintFiles.clear()
+                localFileRefs.clear()
+                uploadedFileRefsCache.clear()
+
+                runOnUiThread {
+                    alertDialog?.hide()
+                }
                 readerStatus = ReaderStatus.LOW_FINGERS_QUALITY
                 setMessage("Poor scan quality. Please try again.")
                 handleCancelButtonsVisibility(isVisible = false)
                 setStartButtonMessage("Scan again", isVisible = true)
+
+
             }
         }
 
@@ -1151,7 +1185,9 @@ internal class ScannerActivity : AppCompatActivity() {
         finish() // Close the current activity.
     }
 
-    private fun NBDeviceScanStatus.handle(previewListenerType: PreviewListenerType) {
+    private fun NBDeviceScanStatus.handle(previewListenerType: PreviewListenerType, readerNo: Int) {
+        println("PreviewListenerType ------------------- reader no - $readerNo ------- ${previewListenerType.name}")
+        println("NBDeviceScanStatus ------------------- reader no - $readerNo ------- ${this.name}")
         when (this) {
             NBDeviceScanStatus.NONE -> {}
             NBDeviceScanStatus.OK -> {}
@@ -1164,12 +1200,18 @@ internal class ScannerActivity : AppCompatActivity() {
             NBDeviceScanStatus.SPOOF -> {}
             NBDeviceScanStatus.EMPTY -> {}
             NBDeviceScanStatus.DONE -> {
+                // add check for both readers
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
-                    readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
-                    setStartButtonMessage("Done", true)
-                    handleCancelButtonsVisibility(isVisible = false)
-                    setMessage(getString(R.string.read_success))
-                    handleMessage("User successfully registered") {}
+                    // Store reader number here
+                    areBothFingerprintScannedSuccessfully[readerNo] = true
+                    if (checkBothFingersSucceed()) {
+                        readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                        setStartButtonMessage("Done", true)
+                        handleCancelButtonsVisibility(isVisible = false)
+                        setMessage(getString(R.string.read_success))
+//                        uploadTemplates()
+                        handleMessage("User successfully registered") {}
+                    }
                 } else {
                     if (previewListenerType == PreviewListenerType.EXTRACTION) {
                         readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
@@ -1206,6 +1248,28 @@ internal class ScannerActivity : AppCompatActivity() {
 
             NBDeviceScanStatus.SPOOF_DETECTED -> {}
         }
+    }
+
+    private fun uploadTemplates() {
+        updateUserInDb(
+            scanningOptions?.uniqueId!!,
+            hashMapOf("fingerPrintLocalPath" to localFileRefs)
+        ) {}
+        println("uploadTemplates ---------------- File size ${fingerprintFiles.size}")
+        fingerprintFiles.forEach { (_, value) ->
+            Log.d(ScannerActivity::class.simpleName, value.name)
+            uploadFileFromLocalToFirebaseStorage(
+                scanningOptions?.uniqueId!!,
+                Uri.fromFile(value)
+            ) {}
+        }
+
+    }
+
+    private fun checkBothFingersSucceed(): Boolean {
+        return if (areBothFingerprintScannedSuccessfully.isEmpty()) false
+        else if (areBothFingerprintScannedSuccessfully.keys.size == 2 && areBothFingerprintScannedSuccessfully.values.all { it }) true
+        else false
     }
 
     fun onScanExtractCompleted() {
@@ -1375,8 +1439,12 @@ internal class ScannerActivity : AppCompatActivity() {
         Firebase.firestore.collection(USER_COLLECTION_PATH).document(uniqueId).get()
             .addOnSuccessListener {
                 Log.d(ScannerActivity::class.simpleName, "User in db - $it")
-                val user = it.toObject(User::class.java)
-                callback(user != null, user)
+                try {
+                    val user = it.toObject(User::class.java)
+                    callback(user != null, user)
+                } catch (e: Exception) {
+                    callback(false, null)
+                }
             }.addOnFailureListener {
                 callback(false, null)
                 it.printStackTrace()
@@ -1444,6 +1512,7 @@ internal class ScannerActivity : AppCompatActivity() {
     ) {
         val fileRef = storageRef.child("${bvnNumber}/${uri.lastPathSegment}")
         val uploadTask = fileRef.putFile(uri)
+
         uploadTask.addOnProgressListener {
             val progress = (100.0 * it.bytesTransferred) / it.totalByteCount
             Log.d(ScannerActivity::class.simpleName, "Upload is $progress% done")
@@ -1460,6 +1529,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     )
                 ) {
                     uploadedFileRefs.clear()
+                    fingerprintFiles.clear()
                     callback(it)
                 }
             }
@@ -1470,6 +1540,64 @@ internal class ScannerActivity : AppCompatActivity() {
         }.addOnFailureListener {
             Log.e(ScannerActivity::class.simpleName, "File upload failed")
             callback(false)
+        }
+    }
+
+    private fun uploadCacheUserFileFromLocalToFirebaseStorage(
+        bvnNumber: String,
+        uri: Uri,
+        callback: (Boolean) -> Unit
+    ) {
+        val fileRef = storageRef.child("${bvnNumber}/${uri.lastPathSegment}")
+        val uploadTask = fileRef.putFile(uri)
+
+        uploadTask.addOnProgressListener {
+            val progress = (100.0 * it.bytesTransferred) / it.totalByteCount
+            Log.d(ScannerActivity::class.simpleName, "Upload is $progress% done")
+        }.addOnSuccessListener {
+            Log.d(ScannerActivity::class.simpleName, "File upload success")
+            uploadedFileRefsCache.add(fileRef.path)
+            if (uploadedFileRefsCache.size == 2) {
+                updateUserInDb(
+                    bvnNumber,
+                    hashMapOf(
+                        "fingerPrintSyncedOnCloud" to true,
+                        "fingerPrintCloudPath" to uploadedFileRefsCache,
+                        "fingerPrintCount" to localFileRefsCache.size
+                    )
+                ) {
+                    uploadedFileRefsCache.clear()
+                    fingerprintFiles.clear()
+                    callback(it)
+                }
+            }
+            Log.d(
+                ScannerActivity::class.simpleName,
+                "uploadedFileRefs size -> ${uploadedFileRefs.size}"
+            )
+        }.addOnFailureListener {
+            Log.e(ScannerActivity::class.simpleName, "File upload failed")
+            callback(false)
+        }
+    }
+
+    private fun deleteFiles(
+        uniqueId: String,
+        callback: (Boolean) -> Unit
+    ) {
+        val dirPath = filesDir.path + "/${uniqueId}/"
+        val files = File(dirPath)
+        if (files.isDirectory) {
+            files.listFiles()?.forEach {
+                val uri = Uri.fromFile(it)
+                val fileRef = storageRef.child("${uniqueId}/${uri.lastPathSegment}")
+                fileRef.delete().addOnSuccessListener {
+                    callback(true)
+                }.addOnFailureListener {
+                    callback(false)
+                }
+            }
+
         }
     }
 
@@ -1603,23 +1731,46 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun ArrayList<DocumentSnapshot>.uploadFiles() {
         forEachIndexed { _, userSnapshot ->
-            val user = userSnapshot.toObject(User::class.java)
-            Log.d(ScannerApp::class.simpleName, "User in db - $user")
-            user?.apply {
-                if (localFileRefs.isNotEmpty()) {
-                    localFileRefs.forEach {
-                        uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(File(it))) {}
-                    }
-                } else {
-                    val dirPath = filesDir.path + "/${uniqueId}/"
+            try {
+                val user = userSnapshot.toObject(User::class.java)
+                Log.d(ScannerApp::class.simpleName, "User in db - $user")
+                user?.apply {
+                    val dirPath = filesDir.path + "/${user.uniqueId}/"
                     val files = File(dirPath)
                     if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
                         files.listFiles()?.forEach {
-                            uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(it)) {}
+                            localFileRefsCache.add(it.absolutePath)
+                            uploadCacheUserFileFromLocalToFirebaseStorage(
+                                user.uniqueId!!,
+                                Uri.fromFile(it)
+                            ) {}
                         }
                     }
+                    /*if (localFileRefs.isNotEmpty()) {
+                        localFileRefs.forEach {
+                            uploadFileFromLocalToFirebaseStorage(
+                                user.uniqueId!!,
+                                Uri.fromFile(File(it))
+                            ) {}
+                        }
+                    } else {
+                        val dirPath = filesDir.path + "/${user.uniqueId}/"
+                        val files = File(dirPath)
+                        if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+                            files.listFiles()?.forEach {
+                                localFileRefs.add(it.absolutePath)
+                                uploadFileFromLocalToFirebaseStorage(
+                                    user.uniqueId!!,
+                                    Uri.fromFile(it)
+                                ) {}
+                            }
+                        }
+                    }*/
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
+
         }
     }
 
