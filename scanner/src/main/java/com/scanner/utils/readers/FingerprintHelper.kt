@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.io.File
 
 internal class FingerprintHelper(
     private val context: Context
@@ -643,11 +644,32 @@ internal class FingerprintHelper(
 
 
     fun scanAndExtract() {
+        if (scanningType == ScanningType.REGISTRATION) {
+            val dirPath = context.filesDir.path + "/$bvnNumber/"
+            val folder = File(dirPath)
+            deleteFolder(folder)
+        }
         if (reader[0]?.scanAndExtract(defaultSavePath) != true ||
             reader[1]?.scanAndExtract(defaultSavePath) != true
         ) {
             readerStatus = ReaderStatus.FINGERS_READ_FAILED
             sessionHelper.onSessionChanges(readerStatus, err)
+        }
+    }
+
+    private fun deleteFolder(folder: File) {
+        if (folder.exists()) {
+            val files = folder.listFiles()
+            if (files != null) { // If the folder contains files
+                for (file in files) {
+                    if (file.isDirectory) {
+                        deleteFolder(file) // Recursively delete subfolders
+                    } else {
+                        file.delete() // Delete files
+                    }
+                }
+            }
+            folder.delete() // Delete the empty folder
         }
     }
 

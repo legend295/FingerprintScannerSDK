@@ -38,7 +38,7 @@ class MainActivity : AppCompatActivity() {
             popUpBackground = R.drawable.bg_round_white
         }
         tvRegistration.setOnClickListener {
-            /*sheet =
+            sheet =
                 showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
                     FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
                         .setPhoneNumber(phoneNumber)
@@ -49,8 +49,8 @@ class MainActivity : AppCompatActivity() {
                             put("pin", 1234)
                         })
                         .start(this, scanningLauncher)
-                }*/
-            if (FingerprintScanner().doesFileExistsInLocalStorage(this, "99999999914")) {
+                }
+           /* if (FingerprintScanner().doesFileExistsInLocalStorage(this, "99999999914")) {
                 println("Files found in local storage")
                 FingerprintScanner().getUser("99999999914") { isSuccess, user ->
                     if (isSuccess && user?.fingerPrintSyncedOnCloud == false) {
@@ -65,24 +65,9 @@ class MainActivity : AppCompatActivity() {
                         println("User not found")
                     }
                 }
-                /*FingerprintScanner().queryUserByKeyValue(
-                    hashMapOf(
-                        Keys.UNIQUE_ID to "99999999914",
-                        FINGER_PRINT_SYNCED_ON_CLOUD to false
-                    ),
-                    null
-                ) { isSuccess, users ->
 
-                }*/
-            } else println("Files not found in local storage")
+            } else println("Files not found in local storage")*/
 
-            /*FingerprintScanner().getUser("99999999914",) { isSuccess, users ->
-                if (isSuccess) {
-                    Log.d(MainActivity::class.simpleName, "By Unique Id - ${users.toString()}")
-                } else {
-                    println("User not found")
-                }
-            }*/
         }
 
         tvVerification.setOnClickListener {

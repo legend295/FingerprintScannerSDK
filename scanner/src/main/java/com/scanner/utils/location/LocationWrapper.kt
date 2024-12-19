@@ -113,7 +113,7 @@ internal class LocationWrapper(private val activity: Activity) {
     }
 
     fun saveLocationToFile(latLng: LatLng?, functionName: String) {
-        val name = createFileName() + "-$functionName" + ".txt"
+       /* val name = createFileName() + "-$functionName" + ".txt"
         val fileDir =
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath + "/locations")
         if (!fileDir.exists())
@@ -133,7 +133,7 @@ internal class LocationWrapper(private val activity: Activity) {
         } finally {
             streamWriter.close()
         }
-
+*/
     }
 
     private fun createFileName(): String? {

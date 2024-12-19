@@ -760,11 +760,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 hashMapOf("fingerPrintLocalPath" to localFileRefs)
             ) {}
             Log.d(ScannerActivity::class.simpleName, file.name)
-            if (file.exists())
-                uploadFileFromLocalToFirebaseStorage(
-                    scanningOptions?.uniqueId!!,
-                    Uri.fromFile(file)
-                ) {}
+            uploadFileFromLocalToFirebaseStorage(
+                scanningOptions?.uniqueId!!,
+                Uri.fromFile(file)
+            ) {}
         }
     }
 
@@ -1609,14 +1608,14 @@ internal class ScannerActivity : AppCompatActivity() {
             user?.apply {
                 if (localFileRefs.isNotEmpty()) {
                     localFileRefs.forEach {
-                        uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(File(it))){}
+                        uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(File(it))) {}
                     }
                 } else {
                     val dirPath = filesDir.path + "/${uniqueId}/"
                     val files = File(dirPath)
                     if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
                         files.listFiles()?.forEach {
-                            uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(it)){}
+                            uploadFileFromLocalToFirebaseStorage(uniqueId!!, Uri.fromFile(it)) {}
                         }
                     }
                 }
@@ -1637,11 +1636,14 @@ internal class ScannerActivity : AppCompatActivity() {
                     val dirPath = context.filesDir.path + "/${user.uniqueId}/"
                     val files = File(dirPath)
                     if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+                        localFileRefs.clear()
                         files.listFiles()?.forEach {
+                            localFileRefs.add(it.absolutePath)
                             uploadFileFromLocalToFirebaseStorage(
                                 user.uniqueId!!,
                                 Uri.fromFile(it)
                             ) { isSuccess ->
+                                localFileRefs.clear()
                                 callback(
                                     isSuccess,
                                     if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
