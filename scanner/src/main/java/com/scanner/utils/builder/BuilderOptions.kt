@@ -16,6 +16,7 @@ internal class BuilderOptions {
     var key: String? = null
     var themeOptions: ThemeOptions? = null
     var customObject: JSONObject? = null
+    var skipLocation: Boolean = false
 //    var firebaseFireStore: FirebaseFirestore? = null
 }
 

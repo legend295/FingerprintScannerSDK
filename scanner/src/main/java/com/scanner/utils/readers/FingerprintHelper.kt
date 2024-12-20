@@ -673,9 +673,6 @@ internal class FingerprintHelper(
         }
     }
 
-    val imageArray = HashMap<Int, ByteArray?>()
-    val scanStatus = HashMap<Int, NBDeviceScanStatus?>()
-    val extractStatus = HashMap<Int, NBBiometricsStatus?>()
 
     val extractionCompleteStatus = HashMap<Int, Boolean>()
 
@@ -687,8 +684,6 @@ internal class FingerprintHelper(
             readerNo: Int,
             quality: Int
         ) {
-            imageArray[readerNo] = image
-//            if (imageArray.size >= 2)
             fingerprintListener.showResult(image, text, bitmap, readerNo, quality)
         }
 
@@ -711,14 +706,10 @@ internal class FingerprintHelper(
             readerNo: Int,
             previewListenerType: PreviewListenerType
         ) {
-            scanStatus[readerNo] = status
-//            if (scanStatus.size >= 2)
             fingerprintListener.onReaderStatusChange(status, readerNo, previewListenerType)
         }
 
         override fun extractionResult(status: NBBiometricsStatus?, readerNo: Int) {
-            extractStatus[readerNo] = status
-//            if (extractStatus.size >= 2)
             fingerprintListener.extractionResult(status, readerNo)
         }
 

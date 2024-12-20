@@ -131,6 +131,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private var timer: CountDownTimer? = null
     private var alertDialog: AlertDialog? = null
     private var currentUser: User? = null
+    private var skipLocation = false
 
     // variable handled to check if both fingers are scanned successfully
     // sometimes only one fingerprint get scanned and reader show successfully scanned. So, to solve this issue we are using this variable
@@ -149,7 +150,7 @@ internal class ScannerActivity : AppCompatActivity() {
         identificationResult.clear()
         verificationDialog = null
 
-
+        // get all users whose FINGER_PRINT_SYNCED_ON_CLOUD is false from cache and upload files
         getUserFromCache { it, isSuccess ->
             val userDocuments = ArrayList<DocumentSnapshot>()
             if (isSuccess) {
@@ -176,6 +177,7 @@ internal class ScannerActivity : AppCompatActivity() {
         val bundle = intent.extras
         val options = bundle?.getString(Constant.SCANNING_OPTIONS)
         scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
+        skipLocation = scanningOptions?.skipLocation ?: false
 
         setCustomTheme(scanningOptions?.themeOptions)
 
@@ -207,26 +209,17 @@ internal class ScannerActivity : AppCompatActivity() {
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
 
-        if (checkPermissions()) {
-            handleLocationEmpty()
-            /*if (locationWrapper.isLocationEnabled(this)) {
-                locationWrapper.getLocation {
-                    if (location == null)
-                        handleLocationEmpty()
-                    else {
-                        saveUserToDB()
-                    }
-                    Log.d(tag, "${location?.latitude}, ${location?.longitude}")
-                }
-                // Initialize Fingerprint readers on background thread on main thread UI will stuck
-                init()
-            } else handleMessage("Please enable location permissions in your settings. User registration requires location access.") {
-                // Initialize Fingerprint readers on background thread on main thread UI will stuck
-                init()
-            }*/
-        } else {
-            requestPermissionLauncher.launch(arrayOf(ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION))
-        }
+        if (!skipLocation)
+            if (checkPermissions()) {
+                handleLocationEmpty()
+            } else {
+                requestPermissionLauncher.launch(
+                    arrayOf(
+                        ACCESS_COARSE_LOCATION,
+                        ACCESS_FINE_LOCATION
+                    )
+                )
+            }
 
 
 
@@ -314,6 +307,10 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun handleLocationEmpty() {
+        if (skipLocation) {
+            init()
+            return
+        }
         if (locationWrapper.isLocationEnabled(this)) {
             locationWrapper.getLocation {}
             val dialog = fetchingLocationDialog(scanningOptions?.themeOptions) {}
@@ -371,7 +368,7 @@ internal class ScannerActivity : AppCompatActivity() {
                                 ) == null
                             ) {
                                 handleMessageAndFinish("User's co-ordinates not found.")
-                            } else if (location == null) {
+                            } else if (location == null && !skipLocation) {
                                 handleLocationEmpty()
                             } else {
                                 // Get user's co-ordinates and create LatLng to check distance
@@ -550,7 +547,7 @@ internal class ScannerActivity : AppCompatActivity() {
             ReaderStatus.SESSION_CLOSED, ReaderStatus.INIT_FAILED -> {
                 // Cancel any ongoing tap operations and reinitialize the finger scanner.
 
-                list.clear() // Clear the data list.
+                clearLists()
                 fingerprintHelper?.cancelTap() // Cancel the finger scanning operation.
                 initialize() // Attempt to initialize or reinitialize the reader.
             }
@@ -607,6 +604,16 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
+    private fun clearLists() {
+        list.clear() // Clear the data list.
+        areBothFingerprintScannedSuccessfully.clear()
+        fingerprintFiles.clear()
+        localFileRefs.clear()
+        localFileRefsCache.clear()
+        uploadedFileRefs.clear()
+        uploadedFileRefsCache.clear()
+    }
+
     override fun onResume() {
         super.onResume()
         fingerprintHelper?.isSessionOpen()
@@ -636,7 +643,8 @@ internal class ScannerActivity : AppCompatActivity() {
                 ReaderStatus.SERVICE_BOUND -> {
                     //Start scanning process readers are initialized
                     setMessage(getString(R.string.scan))
-                    if (location == null) {
+                    // if skip location is false then check for location else skip location check
+                    if (location == null && !skipLocation) {
                         handleLocationEmpty()
                         runOnUiThread {
                             setStartButtonMessage("Start Scan", true)
@@ -978,7 +986,8 @@ internal class ScannerActivity : AppCompatActivity() {
      */
     private fun checkQualityOfFingers(leftQualityPercentage: Int, rightQualityPercentage: Int) {
         if (leftQualityPercentage < 50 || rightQualityPercentage < 50) {
-            list.clear()
+            clearLists()
+
             readerStatus = ReaderStatus.LOW_FINGERS_QUALITY
             setMessage("Scanned fingers quality should be more than 50%. Please scan again")
             handleCancelButtonsVisibility(isVisible = false)
@@ -1060,7 +1069,10 @@ internal class ScannerActivity : AppCompatActivity() {
             localFileRefs.add(path)
             // cross check if files size is 2 or greater then 2
             // if yes then clear list so that files will not get upload more than 2
-            if (fingerprintFiles.size >= 2) fingerprintFiles.clear()
+            if (fingerprintFiles.size >= 2) {
+                println("onTemplateSaveSuccess ---------------- reader no $readerNo------- clearing list")
+                fingerprintFiles.clear()
+            }
             fingerprintFiles[readerNo] = file
             updateUserInDb(
                 scanningOptions?.uniqueId!!,
@@ -1108,22 +1120,46 @@ internal class ScannerActivity : AppCompatActivity() {
         }
 
         override fun extractionResult(status: NBBiometricsStatus?, readerNo: Int) {
-            if (status == NBBiometricsStatus.BAD_QUALITY) {
-                areBothFingerprintScannedSuccessfully.clear()
-                list.clear()
-                fingerprintFiles.clear()
-                localFileRefs.clear()
-                uploadedFileRefsCache.clear()
+            println("extractionResult ---------------- reader no - $readerNo ------- ${status?.name}")
+            /* if (status == NBBiometricsStatus.BAD_QUALITY) {
 
-                runOnUiThread {
-                    alertDialog?.hide()
+             }*/
+            when (status) {
+                NBBiometricsStatus.NONE -> {}
+                NBBiometricsStatus.OK -> {
+                    if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+                        // Store reader number here
+                        areBothFingerprintScannedSuccessfully[readerNo] = true
+                        if (checkBothFingersSucceed()) {
+//                            uploadTemplates()
+                            readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                            setStartButtonMessage("Done", true)
+                            handleCancelButtonsVisibility(isVisible = false)
+                            setMessage(getString(R.string.read_success))
+                            handleMessage("User successfully registered") {}
+                        }
+                    }
                 }
-                readerStatus = ReaderStatus.LOW_FINGERS_QUALITY
-                setMessage("Poor scan quality. Please try again.")
-                handleCancelButtonsVisibility(isVisible = false)
-                setStartButtonMessage("Scan again", isVisible = true)
 
+                NBBiometricsStatus.TIMEOUT -> {}
+                NBBiometricsStatus.CANCELED -> {}
+                NBBiometricsStatus.BAD_QUALITY -> {
+                    clearLists()
+                    runOnUiThread {
+                        alertDialog?.hide()
+                    }
+                    readerStatus = ReaderStatus.LOW_FINGERS_QUALITY
+                    setMessage("Poor scan quality. Please try again.")
+                    handleCancelButtonsVisibility(isVisible = false)
+                    setStartButtonMessage("Scan again", isVisible = true)
+                }
 
+                NBBiometricsStatus.TOO_FEW_MINUTIAE -> {}
+                NBBiometricsStatus.MATCH_NOT_FOUND -> {}
+                NBBiometricsStatus.LATENT_DETECTED -> {}
+                NBBiometricsStatus.NEED_MORE_SAMPLES -> {}
+                NBBiometricsStatus.SPOOF_DETECTED -> {}
+                null -> {}
             }
         }
 
@@ -1203,7 +1239,8 @@ internal class ScannerActivity : AppCompatActivity() {
                 // add check for both readers
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
                     // Store reader number here
-                    areBothFingerprintScannedSuccessfully[readerNo] = true
+                    // this login is added in Extraction result
+                    /*areBothFingerprintScannedSuccessfully[readerNo] = true
                     if (checkBothFingersSucceed()) {
                         readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
                         setStartButtonMessage("Done", true)
@@ -1211,7 +1248,7 @@ internal class ScannerActivity : AppCompatActivity() {
                         setMessage(getString(R.string.read_success))
 //                        uploadTemplates()
                         handleMessage("User successfully registered") {}
-                    }
+                    }*/
                 } else {
                     if (previewListenerType == PreviewListenerType.EXTRACTION) {
                         readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
@@ -1239,11 +1276,11 @@ internal class ScannerActivity : AppCompatActivity() {
             }
 
             NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR -> {
-                setMessage("Please keep your fingers on the sensor")
+                setMessage("Please keep your fingers on the sensor.")
             }
 
             NBDeviceScanStatus.WAIT_FOR_DATA_PROCESSING -> {
-                setMessage("Please wait, processing data...")
+                setMessage("Both fingerprints are required.")
             }
 
             NBDeviceScanStatus.SPOOF_DETECTED -> {}
@@ -1543,6 +1580,14 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * @param bvnNumber - user unique id
+     * @param uri - Uri of the uploading file
+     * @param callback - takes the response back in boolean
+     *
+     * this function is should only be used to upload files which are not uploaded to server due to no internet or slow internet
+     * this is used to sync files when internet connection exists.
+     * */
     private fun uploadCacheUserFileFromLocalToFirebaseStorage(
         bvnNumber: String,
         uri: Uri,
@@ -1581,6 +1626,12 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * @param uniqueId - user uniqueId which is used to create folder on firebase storage
+     * @param callback - takes the response back in boolean
+     *
+     * function used to delete the files from firebase storage for the provided unique Id
+     * */
     private fun deleteFiles(
         uniqueId: String,
         callback: (Boolean) -> Unit
@@ -1735,17 +1786,14 @@ internal class ScannerActivity : AppCompatActivity() {
                 val user = userSnapshot.toObject(User::class.java)
                 Log.d(ScannerApp::class.simpleName, "User in db - $user")
                 user?.apply {
-                    val dirPath = filesDir.path + "/${user.uniqueId}/"
-                    val files = File(dirPath)
-                    if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
-                        files.listFiles()?.forEach {
-                            localFileRefsCache.add(it.absolutePath)
-                            uploadCacheUserFileFromLocalToFirebaseStorage(
-                                user.uniqueId!!,
-                                Uri.fromFile(it)
-                            ) {}
+                    user.uniqueId?.let {
+                        deleteFiles(it) {
+                            upload(user)
                         }
+                    } ?: run {
+                        upload(user)
                     }
+
                     /*if (localFileRefs.isNotEmpty()) {
                         localFileRefs.forEach {
                             uploadFileFromLocalToFirebaseStorage(
@@ -1774,6 +1822,32 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * @param user - user object which needs to be uploaded
+     *
+     * @see uploadFiles there this function is used to upload files
+     * */
+    private fun upload(user: User) {
+        val dirPath = filesDir.path + "/${user.uniqueId}/"
+        val files = File(dirPath)
+        if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+            files.listFiles()?.forEach {
+                localFileRefsCache.add(it.absolutePath)
+                uploadCacheUserFileFromLocalToFirebaseStorage(
+                    user.uniqueId!!,
+                    Uri.fromFile(it)
+                ) {}
+            }
+        }
+    }
+
+    /**
+     * @param context - context of the activity
+     * @param user - user object which needs to be uploaded
+     * @param callback - callback function which will be called after uploading files
+     *
+     * this is public function used to upload files when user is created over firebase and files does not exist on firebase storage
+     * */
     fun uploadFiles(
         context: Context,
         user: User?,
@@ -1783,27 +1857,25 @@ internal class ScannerActivity : AppCompatActivity() {
             val storageListRef =
                 storageRef.child("${user.uniqueId!!}/").listAll()
             runBlocking {
-                if (storageListRef.await().items.isEmpty()) {
-                    val dirPath = context.filesDir.path + "/${user.uniqueId}/"
-                    val files = File(dirPath)
-                    if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
-                        localFileRefs.clear()
-                        files.listFiles()?.forEach {
-                            localFileRefs.add(it.absolutePath)
-                            uploadFileFromLocalToFirebaseStorage(
-                                user.uniqueId!!,
-                                Uri.fromFile(it)
-                            ) { isSuccess ->
-                                localFileRefs.clear()
-                                callback(
-                                    isSuccess,
-                                    if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
-                                )
-                            }
-                        } ?: run {
-                            callback(false, "Files on local storage not found.")
+                val items = storageListRef.await().items
+                if (items.isEmpty()) {
+                    // if list is empty then upload
+                    user.uniqueId?.let { uniqueId ->
+                        uploadFiles(context, uniqueId, callback)
+                    } ?: run {
+                        callback(false, "User not found.")
+                    }
+                } else if (items.size <= 1 || items.size > 2) {
+                    // if file size is smaller then or equal to 1 or items size is greater then 2 then delete the folder files and upload again
+                    // because we are only supporting 2 fingerprint scanning right now
+                    user.uniqueId?.let { uniqueId ->
+                        deleteFiles(uniqueId) {
+                            uploadFiles(context, uniqueId, callback)
                         }
-                    } else callback(false, "Files on local storage not found.")
+                    } ?: run {
+                        callback(false, "User not found.")
+                    }
+
                 } else {
                     user.uniqueId?.let {
                         updateUserInDb(
@@ -1825,6 +1897,40 @@ internal class ScannerActivity : AppCompatActivity() {
         } ?: run {
             callback(false, "User not found.")
         }
+    }
+
+    /**
+     * @param context - context of the activity
+     * @param uniqueId - unique id of the user
+     * @param callback - callback function which will be called after uploading files
+     *
+     * this is common function extracted from uploadFiles() function
+     * */
+    private fun uploadFiles(
+        context: Context,
+        uniqueId: String,
+        callback: (Boolean, String) -> Unit
+    ) {
+        val dirPath = context.filesDir.path + "/${uniqueId}/"
+        val files = File(dirPath)
+        if (files.isDirectory && !files.listFiles().isNullOrEmpty()) {
+            localFileRefs.clear()
+            files.listFiles()?.forEach {
+                localFileRefs.add(it.absolutePath)
+                uploadFileFromLocalToFirebaseStorage(
+                    uniqueId,
+                    Uri.fromFile(it)
+                ) { isSuccess ->
+                    localFileRefs.clear()
+                    callback(
+                        isSuccess,
+                        if (isSuccess) "Files uploaded successfully" else "Files not uploaded."
+                    )
+                }
+            } ?: run {
+                callback(false, "Files on local storage not found.")
+            }
+        } else callback(false, "Files on local storage not found.")
     }
 
     private fun saveTransactionToDb() {

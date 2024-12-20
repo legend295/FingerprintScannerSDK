@@ -1031,8 +1031,8 @@ internal class FingerprintReader(
 //                    } catch (ex: Exception) {
 //                        ex.printStackTrace()
 //                    }
+                    fingerprintListener.extractionResult(extractResult?.status, readerNo)
                     if (extractResult?.status != NBBiometricsStatus.OK) {
-                        fingerprintListener.extractionResult(extractResult?.status, readerNo)
                         return false
 //                    throw Exception("Extraction failed, reason: " + extractResult?.status)
                     }

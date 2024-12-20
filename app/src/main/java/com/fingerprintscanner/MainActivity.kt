@@ -48,6 +48,7 @@ class MainActivity : AppCompatActivity() {
                         .setCustomData(JSONObject().apply {
                             put("pin", 1234)
                         })
+                        .skipLocation(skipLocation = false)
                         .start(this, scanningLauncher)
                 }
            /* if (FingerprintScanner().doesFileExistsInLocalStorage(this, "99999999914")) {

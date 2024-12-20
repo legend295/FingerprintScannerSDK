@@ -74,6 +74,11 @@ class FingerprintScanner {
             return this
         }
 
+        fun skipLocation(skipLocation:Boolean): Builder{
+            options.skipLocation = skipLocation
+            return this
+        }
+
 
         fun start(
             activity: Activity,
