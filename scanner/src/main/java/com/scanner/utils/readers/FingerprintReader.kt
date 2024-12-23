@@ -26,6 +26,8 @@ import com.nextbiometrics.devices.NBDeviceScanFormatInfo
 import com.nextbiometrics.devices.NBDeviceScanResult
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceSecurityModel
+import com.nextbiometrics.devices.NBDeviceState
+import com.nextbiometrics.devices.NBDeviceStopMode
 import com.nextbiometrics.system.NextBiometricsException
 import com.scanner.utils.KeyStore.decryptData
 import com.scanner.utils.KeyStore.encryptData
@@ -276,7 +278,7 @@ internal class FingerprintReader(
         Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::DetectFinger...")
         return try {
             detectLevel = reader!!.fingerDetectValue
-            //Log.d("WaxdPosLib", "FingerPrintReader[" + readerNo + "]::Detect -> val = " + val);
+//            Log.d("WaxdPosLib", "FingerPrintReader[$readerNo]::Detect -> val = $detectLevel");
             if (detectLevel >= level) {
                 Log.d(
                     "WaxdPosLib",
@@ -387,7 +389,8 @@ internal class FingerprintReader(
             try {
                 context.cancelOperation()
                 reader?.lowPowerMode()
-                reader?.reset()
+//                reader?.reset()
+
             } catch (ex: NextBiometricsException) {
                 Log.e(
                     "WaxdPosLib",
@@ -772,7 +775,7 @@ internal class FingerprintReader(
                     val template = context.loadTemplate(templateType, array)
                     println("Template loaded successfully.")
                     callback(template)
-                }?:run {
+                } ?: run {
                     Log.d(
                         "WaxdPosLib",
                         "FingerprintReader[$readerNo]::loadTemplate -> array size is empty}"
@@ -1355,6 +1358,10 @@ internal class FingerprintReader(
 
     fun setReader(reader: NBDevice) {
         this.reader = reader
+    }
+
+    fun getReaderState(): NBDeviceState? {
+        return reader?.state
     }
 
 

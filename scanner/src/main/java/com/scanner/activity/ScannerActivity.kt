@@ -133,6 +133,10 @@ internal class ScannerActivity : AppCompatActivity() {
     private var currentUser: User? = null
     private var skipLocation = false
 
+    // if sleepModeTrack is equal to 3 then reinitialize the fingerprints
+    // increment this when every sleep model trigger
+    private var sleepModeTrack = 0
+
     // variable handled to check if both fingers are scanned successfully
     // sometimes only one fingerprint get scanned and reader show successfully scanned. So, to solve this issue we are using this variable
     private var areBothFingerprintScannedSuccessfully = HashMap<Int, Boolean>()
@@ -209,6 +213,7 @@ internal class ScannerActivity : AppCompatActivity() {
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
 
+        // if we are not skipping the location then fetch user's location
         if (!skipLocation)
             if (checkPermissions()) {
                 handleLocationEmpty()
@@ -220,6 +225,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     )
                 )
             }
+        else init()
 
 
 
@@ -350,11 +356,12 @@ internal class ScannerActivity : AppCompatActivity() {
                 currentUser = user
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
                     val storageListRef =
-                        storageRef.child("${scanningOptions?.uniqueId!!}/").listAll()
+                        storageRef.child("${bvnNumber}/").listAll()
                     runBlocking {
                         if (userFound && user?.fingerPrintSyncedOnCloud == true && storageListRef.await().items.size == 2) {
                             handleMessageAndFinish("The user is already registered with entered Unique number. Please try with new BVN.")
                         } else {
+//                            doesFileExistsInLocalStorage(this@ScannerActivity, bvnNumber){}
                             saveUserToDB()
                             initialize()
                         }
@@ -534,7 +541,9 @@ internal class ScannerActivity : AppCompatActivity() {
                 /* if (scanningOptions?.scanningType == ScanningType.REGISTRATION)
                      setMessage("Please put your both fingers on sensor.") // Prompt the user to scan their fingerprints.
                  else setMessage("Please put your both fingers on sensor for verification.")*/
+                clearLists()
                 setMessage("Initializing sensor, please wait...")
+                sleepModeTrack = 0
                 handleCancelButtonsVisibility(isVisible = true) // Make the cancel buttons visible.
                 setStartButtonMessage(
                     "",
@@ -587,7 +596,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 setStartButtonMessage("", isVisible = false) // Hide the start button.
                 resetImages() // Reset any fingerprint images or related visuals.
                 scanningOptions?.uniqueId?.let {
-                    deleteFiles(it) { success ->
+                    deleteFilesFromFirebaseStorage(this, it) { success ->
                         println("File Delete on Low finger quality ------ $success")
                     }
                 }
@@ -600,6 +609,24 @@ internal class ScannerActivity : AppCompatActivity() {
 
             ReaderStatus.FINGERS_VERIFICATION_FAILED -> {
                 setFingerprintScanningResult(result = false)
+            }
+
+            ReaderStatus.LOW_POWER_MODE -> {
+                // need to add 8 because sleepModeTrack++ get called 2 times due to 2 fingerprint reader so we need to keep check for 8/2 = 4
+                if (sleepModeTrack > 8) {
+                    sleepModeTrack = 0
+                    fingerprintHelper?.setInit(init = false)
+                    resetImages()
+                    initialize()
+                } else {
+                    setMessage("Initializing sensor, please wait...")
+                    handleCancelButtonsVisibility(isVisible = false) // Make the cancel buttons gone.
+                    setStartButtonMessage(
+                        "",
+                        isVisible = false
+                    ) // Hide the start button by making its message empty and its visibility false.
+                    fingerprintHelper?.scanAndExtract()
+                }
             }
         }
     }
@@ -730,6 +757,18 @@ internal class ScannerActivity : AppCompatActivity() {
                 ReaderStatus.LOW_FINGERS_QUALITY -> {}
                 ReaderStatus.FINGERS_VERIFICATION_SUCCESS -> {}
                 ReaderStatus.FINGERS_VERIFICATION_FAILED -> {}
+                ReaderStatus.LOW_POWER_MODE -> {
+                    resetImages()
+                    sleepModeTrack++
+                    val msg =
+                        "Device is in sleep mode. Please touch the finger sensor to wake it up."
+                    setMessage(msg)
+                    runOnUiThread {
+                        handleCancelButtonsVisibility(isVisible = false)
+                        getDialog()?.dismiss()
+                    }
+                    setStartButtonMessage("Start Scan", isVisible = true)
+                }
             }
         }
     }
@@ -1073,18 +1112,20 @@ internal class ScannerActivity : AppCompatActivity() {
                 println("onTemplateSaveSuccess ---------------- reader no $readerNo------- clearing list")
                 fingerprintFiles.clear()
             }
-            fingerprintFiles[readerNo] = file
-            updateUserInDb(
-                scanningOptions?.uniqueId!!,
-                hashMapOf("fingerPrintLocalPath" to localFileRefs)
-            ) {}
-            println("uploadTemplates ---------------- File size ${fingerprintFiles.size}")
-            Log.d(ScannerActivity::class.simpleName, file.name)
-            uploadFileFromLocalToFirebaseStorage(
-                scanningOptions?.uniqueId!!,
-                Uri.fromFile(file)
-            ) {}
-            println("onTemplateSaveSuccess ---------------- reader no $readerNo ------- File size ${fingerprintFiles.size}")
+            if (!fingerprintFiles.containsKey(readerNo)) {
+                fingerprintFiles[readerNo] = file
+                updateUserInDb(
+                    scanningOptions?.uniqueId!!,
+                    hashMapOf("fingerPrintLocalPath" to localFileRefs)
+                ) {}
+                println("uploadTemplates ---------------- File size ${fingerprintFiles.size}")
+                Log.d(ScannerActivity::class.simpleName, file.name)
+                uploadFileFromLocalToFirebaseStorage(
+                    scanningOptions?.uniqueId!!,
+                    Uri.fromFile(file)
+                ) {}
+                println("onTemplateSaveSuccess ---------------- reader no $readerNo ------- File size ${fingerprintFiles.size}")
+            }
         }
     }
 
@@ -1319,18 +1360,17 @@ internal class ScannerActivity : AppCompatActivity() {
     private fun showMessage(message: String?, isErrorMessage: Boolean) {
         runOnUiThread {
             if (message.equals("ERROR: Invalid operation", ignoreCase = true)) {
-                val msg = "Device is in sleep mode. Please touch the finger sensor to wake it up."
-                setMessage(msg)
-                this@ScannerActivity.readerStatus = ReaderStatus.SERVICE_BOUND
-                runOnUiThread {
-                    handleCancelButtonsVisibility(isVisible = false)
-                    getDialog()?.dismiss()
-                }
-                scope?.cancel()
-                scope = fingerprintHelper?.waitFingerDetect {
-                    setMessage(getString(R.string.scan))
-                    setStartButtonMessage("Start Scan", isVisible = true)
-                }
+                this@ScannerActivity.readerStatus = ReaderStatus.LOW_POWER_MODE
+                onSessionChanges.onSessionChanges(ReaderStatus.LOW_POWER_MODE)
+                /* runOnUiThread {
+                     handleCancelButtonsVisibility(isVisible = false)
+                     getDialog()?.dismiss()
+                 }
+                 scope?.cancel()
+                 scope = fingerprintHelper?.waitFingerDetect {
+                     setMessage(getString(R.string.scan))
+                     setStartButtonMessage("Start Scan", isVisible = true)
+                 }*/
             } else {
                 if (isErrorMessage) {
                     message?.let { Log.e("MainActivity", it) }
@@ -1630,15 +1670,20 @@ internal class ScannerActivity : AppCompatActivity() {
      * @param uniqueId - user uniqueId which is used to create folder on firebase storage
      * @param callback - takes the response back in boolean
      *
-     * function used to delete the files from firebase storage for the provided unique Id
+     * - function used to delete the files from firebase storage for the provided unique Id
      * */
-    private fun deleteFiles(
+    fun deleteFilesFromFirebaseStorage(
+        context: Context,
         uniqueId: String,
         callback: (Boolean) -> Unit
     ) {
-        val dirPath = filesDir.path + "/${uniqueId}/"
+        val dirPath = context.filesDir.path + "/${uniqueId}/"
         val files = File(dirPath)
         if (files.isDirectory) {
+            if (files.listFiles().isNullOrEmpty()) {
+                callback(true)
+                return
+            }
             files.listFiles()?.forEach {
                 val uri = Uri.fromFile(it)
                 val fileRef = storageRef.child("${uniqueId}/${uri.lastPathSegment}")
@@ -1647,8 +1692,11 @@ internal class ScannerActivity : AppCompatActivity() {
                 }.addOnFailureListener {
                     callback(false)
                 }
+            } ?: run {
+                callback(true)
             }
-
+        } else {
+            callback(true)
         }
     }
 
@@ -1787,7 +1835,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 Log.d(ScannerApp::class.simpleName, "User in db - $user")
                 user?.apply {
                     user.uniqueId?.let {
-                        deleteFiles(it) {
+                        deleteFilesFromFirebaseStorage(this@ScannerActivity, it) {
                             upload(user)
                         }
                     } ?: run {
@@ -1869,7 +1917,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     // if file size is smaller then or equal to 1 or items size is greater then 2 then delete the folder files and upload again
                     // because we are only supporting 2 fingerprint scanning right now
                     user.uniqueId?.let { uniqueId ->
-                        deleteFiles(uniqueId) {
+                        deleteFilesFromFirebaseStorage(context, uniqueId) {
                             uploadFiles(context, uniqueId, callback)
                         }
                     } ?: run {
@@ -1962,10 +2010,80 @@ internal class ScannerActivity : AppCompatActivity() {
         return Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
     }
 
-    fun doesFileExistsInLocalStorage(context: Context, uniqueId: String): Boolean {
+    /**
+     * @param context - context of the activity.
+     * @param uniqueId - unique id of the user.
+     * @param callback - takes the response back in boolean.
+     *
+     * - If the directory has less than or equal to 1 file or more than 2 files,
+     * it attempts to delete the directory and its contents.
+     * Then, it informs the caller (via the callback) about the directory's state.
+     *
+     * - If the directory has exactly 2 files, it informs the caller that the directory exists, is not empty, and has 2 files.
+     * */
+    fun doesFileExistsInLocalStorage(
+        context: Context,
+        uniqueId: String,
+        callback: (Boolean) -> Unit
+    ) {
         val dirPath = context.filesDir.path + "/${uniqueId}/"
         val files = File(dirPath)
-        return files.isDirectory && !files.listFiles().isNullOrEmpty()
+        if (files.listFiles().isNullOrEmpty()) {
+            println("doesFileExistsInLocalStorage ----- files not found locally.")
+            callback(false)
+            return
+        }
+        if ((files.listFiles()?.size ?: 0) <= 1 || (files.listFiles()?.size ?: 0) > 2) {
+            println("doesFileExistsInLocalStorage ----- deleting files")
+            deleteFilesFromFirebaseStorage(context, uniqueId) {
+                deleteFolder(files)
+                callback(files.isDirectory && !files.listFiles().isNullOrEmpty())
+            }
+        } else {
+            val doesExists = files.isDirectory && !files.listFiles()
+                .isNullOrEmpty() && files.listFiles()?.size == 2
+            println("doesFileExistsInLocalStorage ----- $doesExists")
+            callback(doesExists)
+        }
+    }
+
+    /**
+     * - It tries to list all files within a specific directory in Firebase Cloud Storage.
+     * - If successful, it calls a callback function with true (files found) and the number of files.
+     * - If there's an error during the listing operation, it calls the callback function with false (no files found) and 0.
+     * */
+    fun doesFileExistsOnFirebaseStorage(uniqueId: String, callback: (Boolean, Int) -> Unit) {
+        val storageListRef =
+            storageRef.child("${uniqueId}/").listAll()
+
+        storageListRef.addOnSuccessListener {
+            callback(it.items.isNotEmpty(), it.items.size)
+        }.addOnFailureListener {
+            callback(false, 0)
+        }
+    }
+
+    /**
+     * - Checking if the folder exists.
+     * - Listing all files and subfolders inside it.
+     * - Recursively deleting subfolders and their contents.
+     * - Deleting individual files within the folder.
+     * - Finally, deleting the empty folder itself.
+     * */
+    private fun deleteFolder(folder: File) {
+        if (folder.exists()) {
+            val files = folder.listFiles()
+            if (files != null) { // If the folder contains files
+                for (file in files) {
+                    if (file.isDirectory) {
+                        deleteFolder(file) // Recursively delete subfolders
+                    } else {
+                        file.delete() // Delete files
+                    }
+                }
+            }
+            folder.delete() // Delete the empty folder
+        }
     }
 
     /*#endregion*/

@@ -9,6 +9,7 @@ import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
 import com.nextbiometrics.devices.NBDevice
 import com.nextbiometrics.devices.NBDeviceScanStatus
+import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.devices.NBDevices
 import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
@@ -77,6 +78,10 @@ internal class FingerprintHelper(
         this.fingerprintListener = fingerprintListener
     }
 
+    fun setInit(init: Boolean) {
+        this.init = init
+    }
+
     fun init(): Boolean {
         if (scanningType == null || bvnNumber == null) return false
         Log.d("WaxdPosLib", "FingerprintService::Init...")
@@ -90,13 +95,38 @@ internal class FingerprintHelper(
             PowerControl(context).usbPower(1)
             Thread.sleep(1000)
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize...")
-            Log.d(
+            /*Log.d(
                 "WaxdPosLib",
                 "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
-            )
+            )*/
             //NBDevices.initialize(context.getApplicationContext());
-            if (!NBDevices.isInitialized())
+            if (!NBDevices.isInitialized()) {
                 NBDevices.initialize(context)
+                Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing")
+                for (i in 0..49) {
+                    Thread.sleep(500)
+                    Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing $i")
+                    if (NBDevices.isInitialized()) {
+                        Log.d(
+                            "WaxdPosLib",
+                            "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
+                        )
+                        break
+                    } else if (i == 49) {
+                        err = "Device initialization failed."
+                        Log.d(
+                            "WaxdPosLib",
+                            "FingerPrintService::Init -> No fingerprint reader found"
+                        )
+                        readerInfo = "No fingerprint reader"
+                        readerStatus = ReaderStatus.INIT_FAILED
+                        sessionHelper.onSessionChanges(readerStatus, err)
+                    }
+
+                }
+
+
+            }
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize... Done")
             terminate = true
             Log.d("WaxdPosLib", "FingerPrintService::Init -> Waiting for USB devices ...")
@@ -413,6 +443,7 @@ internal class FingerprintHelper(
     fun waitFingerDetect(callback: (Boolean) -> Unit): CoroutineScope {
         val scope = CoroutineScope(Dispatchers.IO)
         scope.launch {
+            level = defaultLevel
             waitFingersDetectForLoop(level, timeout, callback)
         }
         return scope
@@ -428,7 +459,8 @@ internal class FingerprintHelper(
         return try {
             run = true
             val s = System.currentTimeMillis()
-            for (i in 0..3) {
+//            for (i in 0..3) {
+            while (run) {
                 if (!reader[0]!!.isSessionOpen()) {
                     run = false
                     Log.d(
@@ -499,6 +531,22 @@ internal class FingerprintHelper(
 //            handler.sendMessage("SESSION CLOSED")
             readerStatus = ReaderStatus.SESSION_CLOSED
             sessionHelper.onSessionChanges(readerStatus)
+        }
+    }
+
+    fun isSession(): Boolean {
+        if (!init) return false
+        val isFirstOpen: Boolean
+        val isSecondOpen: Boolean
+
+        try {
+            Log.d("WaxdPosLib", "FingerprintService::isSessionOpen")
+            isFirstOpen = reader[0]?.isSessionOpen() ?: false
+            isSecondOpen = reader[1]?.isSessionOpen() ?: false
+            return isFirstOpen && isSecondOpen
+        } catch (e: java.lang.Exception) {
+            Log.e("WaxdPosLib", "FingerprintService::isSessionOpen -> Exception " + e.message)
+            return false
         }
     }
 
@@ -654,6 +702,34 @@ internal class FingerprintHelper(
         ) {
             readerStatus = ReaderStatus.FINGERS_READ_FAILED
             sessionHelper.onSessionChanges(readerStatus, err)
+        }
+    }
+
+    private fun checkReaderState(){
+        when(reader[0]?.getReaderState()){
+            NBDeviceState.NOT_CONNECTED -> {
+                println("reader[0] -------- Not Connected")
+            }
+            NBDeviceState.NOT_AWAKE -> {
+                println("reader[0] -------- Not Awake")
+            }
+            NBDeviceState.AWAKE -> {
+                println("reader[0] -------- Awake")
+            }
+            null -> {}
+        }
+
+        when(reader[1]?.getReaderState()){
+            NBDeviceState.NOT_CONNECTED -> {
+                println("reader[1] -------- Not Connected")
+            }
+            NBDeviceState.NOT_AWAKE -> {
+                println("reader[1] -------- Not Awake")
+            }
+            NBDeviceState.AWAKE -> {
+                println("reader[1] -------- Awake")
+            }
+            null -> {}
         }
     }
 

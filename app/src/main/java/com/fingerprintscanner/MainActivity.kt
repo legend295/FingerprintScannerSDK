@@ -3,9 +3,11 @@ package com.fingerprintscanner
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatTextView
+import androidx.core.widget.ContentLoadingProgressBar
 import com.fingerprintscanner.utility.showFieldsDialog
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.firebase.firestore.DocumentSnapshot
@@ -22,52 +24,66 @@ import java.io.File
 class MainActivity : AppCompatActivity() {
     private var tvStatus: AppCompatTextView? = null
     private var sheet: BottomSheetDialog? = null
+    private var progressBar: ContentLoadingProgressBar? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         val tvRegistration: Button = findViewById(R.id.btnRegistration)
         val tvVerification: Button = findViewById(R.id.btnVerification)
+        progressBar = findViewById(R.id.progressBar)
+        progressBar?.hide()
+
         tvStatus = findViewById(R.id.tvStatus)
-        val themeOptions = ThemeOptions().apply {
-            buttonColor = R.color.black
-            buttonTextColor = R.color.white
-            messageColor = R.color.black
-            titleTextColor = R.color.black
-            contentTextColor = R.color.black
-            buttonBackground = R.drawable.bg_round_white
-            popUpBackground = R.drawable.bg_round_white
-        }
+
         tvRegistration.setOnClickListener {
             sheet =
                 showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
-                    FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
-                        .setPhoneNumber(phoneNumber)
-                        .setScanningType(ScanningType.REGISTRATION)
-                        .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
-                        .setThemeOptions(themeOptions)
-                        .setCustomData(JSONObject().apply {
-                            put("pin", 1234)
-                        })
-                        .skipLocation(skipLocation = false)
-                        .start(this, scanningLauncher)
-                }
-           /* if (FingerprintScanner().doesFileExistsInLocalStorage(this, "99999999914")) {
-                println("Files found in local storage")
-                FingerprintScanner().getUser("99999999914") { isSuccess, user ->
-                    if (isSuccess && user?.fingerPrintSyncedOnCloud == false) {
-                        Log.d(MainActivity::class.simpleName, "By Unique Id - $user")
-                        FingerprintScanner().uploadFiles(
-                            this,
-                            user
-                        ) { _, msg ->
-                            println("MainActivity File upload - $msg")
+                    sheet?.dismiss()
+//                    startRegistration(bvnNumber, phoneNumber)
+//                    return@showFieldsDialog
+                    progressBar?.show()
+                    FingerprintScanner().getUser(bvnNumber) { isSuccess, user ->
+                        if (user == null) {
+                            progressBar?.hide()
+                            startRegistration(bvnNumber, phoneNumber)
+                            return@getUser
                         }
-                    } else {
-                        println("User not found")
+                        FingerprintScanner().doesFileExistsInLocalStorage(
+                            this,
+                            bvnNumber
+                        ) { doesExist ->
+                            if (doesExist)
+                                FingerprintScanner().uploadFiles(this, user) { isSuccess, msg ->
+                                    progressBar?.hide()
+                                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                                }
+                            else {
+                                progressBar?.hide()
+                                startRegistration(bvnNumber, phoneNumber)
+                            }
+                        }
                     }
                 }
 
-            } else println("Files not found in local storage")*/
+
+            /* if (FingerprintScanner().doesFileExistsInLocalStorage(this, "99999999914")) {
+                 println("Files found in local storage")
+                 FingerprintScanner().getUser("99999999914") { isSuccess, user ->
+                     if (isSuccess && user?.fingerPrintSyncedOnCloud == false) {
+                         Log.d(MainActivity::class.simpleName, "By Unique Id - $user")
+                         FingerprintScanner().uploadFiles(
+                             this,
+                             user
+                         ) { _, msg ->
+                             println("MainActivity File upload - $msg")
+                         }
+                     } else {
+                         println("User not found")
+                     }
+                 }
+
+             } else println("Files not found in local storage")*/
 
         }
 
@@ -102,6 +118,30 @@ class MainActivity : AppCompatActivity() {
 
              }
          }*/
+    }
+
+    private fun startRegistration(bvnNumber: String, phoneNumber: String) {
+        val themeOptions = ThemeOptions().apply {
+            buttonColor = R.color.black
+            buttonTextColor = R.color.white
+            messageColor = R.color.black
+            titleTextColor = R.color.black
+            contentTextColor = R.color.black
+            buttonBackground = R.drawable.bg_round_white
+            popUpBackground = R.drawable.bg_round_white
+        }
+
+        FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
+            .setPhoneNumber(phoneNumber)
+            .setScanningType(ScanningType.REGISTRATION)
+            .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
+            .setThemeOptions(themeOptions)
+            .setCustomData(JSONObject().apply {
+                put("pin", 1234)
+            })
+            .skipLocation(skipLocation = true)
+            .start(this, scanningLauncher)
+
     }
 
     override fun onPause() {

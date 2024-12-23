@@ -10,6 +10,7 @@ import androidx.fragment.app.Fragment
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.QuerySnapshot
 import com.google.gson.Gson
+import com.scanner.activity.ScannerActivity
 import com.scanner.model.User
 import com.scanner.utils.builder.BuilderOptions
 import com.scanner.utils.builder.ThemeOptions
@@ -74,7 +75,7 @@ class FingerprintScanner {
             return this
         }
 
-        fun skipLocation(skipLocation:Boolean): Builder{
+        fun skipLocation(skipLocation: Boolean): Builder {
             options.skipLocation = skipLocation
             return this
         }
@@ -132,27 +133,28 @@ class FingerprintScanner {
         ScannerActivity().getUser(bvnNumber, callback)
     }
 
-    /*fun getUserFromCache(
-        uniqueId: String,
-        querySnapShot: (QuerySnapshot?, isSuccess: Boolean) -> Unit
-    ) {
-        ScannerActivity().getUserFromCacheByUniqueId(uniqueId, querySnapShot)
-    }
-*/
-    /*   fun getUserFromCacheByKeyValue(
-           key: String,
-           value: Any,
-           querySnapShot: (QuerySnapshot?, Boolean) -> Unit
-       ) {
-           ScannerActivity().getUserFromCacheByKeyValue(key, value, querySnapShot)
-       }
-   */
     fun uploadFiles(context: Context, user: User?, callback: (Boolean, String) -> Unit) {
         ScannerActivity().uploadFiles(context, user, callback)
     }
 
-    fun doesFileExistsInLocalStorage(context: Context, uniqueId: String): Boolean =
-        ScannerActivity().doesFileExistsInLocalStorage(context, uniqueId)
+    fun doesFileExistsInLocalStorage(
+        context: Context,
+        uniqueId: String,
+        callback: (Boolean) -> Unit
+    ) =
+        ScannerActivity().doesFileExistsInLocalStorage(context, uniqueId, callback)
+
+    fun doesFileExistsOnFirebaseStorage(
+        uniqueId: String,
+        callback: (Boolean, fileCount: Int) -> Unit
+    ) =
+        ScannerActivity().doesFileExistsOnFirebaseStorage(uniqueId, callback)
+
+    fun deleteFilesFromFirebaseStorage(
+        context: Context,
+        uniqueId: String,
+        callback: (Boolean) -> Unit
+    ) = ScannerActivity().deleteFilesFromFirebaseStorage(context,uniqueId, callback)
 
     fun queryUserByKeyValue(
         queryMap: HashMap<String, Any>,
