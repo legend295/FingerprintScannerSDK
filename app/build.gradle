@@ -2,6 +2,7 @@ plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
     id 'com.google.gms.google-services'
+    id "com.newrelic.agent.android"
 //    id 'maven-publish'
 }
 android {
@@ -50,5 +51,7 @@ dependencies {
     // When using the BoM, you don't specify versions in Firebase library dependencies
     implementation 'com.google.firebase:firebase-firestore'
     implementation 'com.google.firebase:firebase-analytics'
+
+    implementation 'com.newrelic.agent.android:android-agent:7.6.2'
 }
 

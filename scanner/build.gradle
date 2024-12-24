@@ -6,11 +6,13 @@ plugins {
     id "com.vanniktech.maven.publish" version "0.28.0"
     id 'signing'
     id 'kotlin-kapt'
+    id "com.newrelic.agent.android"
 //    id 'com.github.dcendents.android-maven'
 }
 
 def localProperties = new Properties()
 localProperties.load(new FileInputStream(rootProject.file("local.properties")))
+def newRelicToken = project.findProperty("com.newrelic.application_token") ?: ""
 
 android {
     namespace 'com.github.legend295.fingerprintscanner'
@@ -20,6 +22,7 @@ android {
         minSdk 24
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
+        buildConfigField "String", "NEW_RELIC_TOKEN", "\"${newRelicToken}\""
     }
 
     buildTypes {
@@ -84,4 +87,7 @@ dependencies {
     implementation 'com.google.firebase:firebase-firestore:25.1.0'
     implementation 'com.google.firebase:firebase-storage:21.0.0'
     implementation 'com.google.maps.android:android-maps-utils:2.0.3'
+
+    implementation 'com.newrelic.agent.android:android-agent:7.6.2'
+
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import com.common.apiutil.powercontrol.PowerControl
+import com.newrelic.agent.android.NewRelic
 import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -208,16 +209,19 @@ internal class FingerprintHelper(
             readerStatus = ReaderStatus.INIT_FAILED
             sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            NewRelic.recordHandledException(e)
             false
         } catch (e: ExceptionInInitializerError) {
             readerStatus = ReaderStatus.INIT_FAILED
             sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            NewRelic.recordHandledException(e)
             false
         } catch (e: NoClassDefFoundError) {
             readerStatus = ReaderStatus.INIT_FAILED
             sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            NewRelic.recordHandledException(e)
             false
         }
     }
@@ -257,6 +261,7 @@ internal class FingerprintHelper(
             started = true
             true
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.d("WaxdPosLib", "FingerprintService::Start -> Exception " + e.message)
             false
         }
@@ -391,8 +396,8 @@ internal class FingerprintHelper(
     fun stop() {
         run = false
         started = false
-        /*  Log.d("WaxdPosLib", "FingerprintService::Stop")
-          close()*/
+        /*Log.d("WaxdPosLib", "FingerprintService::Stop")
+        close()*/
     }
 
     fun setSavePath(path: String) {
@@ -409,12 +414,13 @@ internal class FingerprintHelper(
                     reader[i] = null
                 }
             }
-            if (terminate) {
+            /*if (terminate) {
                 NBDevices.terminate()
             }
 
-            PowerControl(context).usbPower(0)
+            PowerControl(context).usbPower(0)*/
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::Close -> Exception: " + e.message)
         }
     }
@@ -426,6 +432,7 @@ internal class FingerprintHelper(
             reader[0]!!.cancelTap()
             reader[1]!!.cancelTap()
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::CancelTap -> Exception " + e.message)
         }
     }
@@ -436,6 +443,7 @@ internal class FingerprintHelper(
             reader[0]?.enableLowPowerMode()
             reader[1]?.enableLowPowerMode()
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::enableLowPowerMode -> Exception " + e.message)
         }
     }
@@ -497,6 +505,7 @@ internal class FingerprintHelper(
             Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Done")
             false
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Exception: " + e.message)
             callback(false)
             false
@@ -527,6 +536,7 @@ internal class FingerprintHelper(
                 PowerControl(context).usbPower(0)
             }
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::isSessionOpen -> Exception " + e.message)
 //            handler.sendMessage("SESSION CLOSED")
             readerStatus = ReaderStatus.SESSION_CLOSED
@@ -545,6 +555,7 @@ internal class FingerprintHelper(
             isSecondOpen = reader[1]?.isSessionOpen() ?: false
             return isFirstOpen && isSecondOpen
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::isSessionOpen -> Exception " + e.message)
             return false
         }
@@ -588,6 +599,7 @@ internal class FingerprintHelper(
             Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Done")
             false
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Exception: " + e.message)
             false
         }
@@ -622,6 +634,7 @@ internal class FingerprintHelper(
                     Thread.sleep(100)
                 }
             } catch (e: InterruptedException) {
+                NewRelic.recordHandledException(e)
                 Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> Interrupt Exception ...")
             }
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> while done ...")
@@ -646,6 +659,7 @@ internal class FingerprintHelper(
             released = false
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> Done")
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerPrintService::ReadFingers -> Exception: " + e.message)
         }
     }
@@ -705,47 +719,57 @@ internal class FingerprintHelper(
         }
     }
 
-    private fun checkReaderState(){
-        when(reader[0]?.getReaderState()){
+    private fun checkReaderState() {
+        when (reader[0]?.getReaderState()) {
             NBDeviceState.NOT_CONNECTED -> {
                 println("reader[0] -------- Not Connected")
             }
+
             NBDeviceState.NOT_AWAKE -> {
                 println("reader[0] -------- Not Awake")
             }
+
             NBDeviceState.AWAKE -> {
                 println("reader[0] -------- Awake")
             }
+
             null -> {}
         }
 
-        when(reader[1]?.getReaderState()){
+        when (reader[1]?.getReaderState()) {
             NBDeviceState.NOT_CONNECTED -> {
                 println("reader[1] -------- Not Connected")
             }
+
             NBDeviceState.NOT_AWAKE -> {
                 println("reader[1] -------- Not Awake")
             }
+
             NBDeviceState.AWAKE -> {
                 println("reader[1] -------- Awake")
             }
+
             null -> {}
         }
     }
 
     private fun deleteFolder(folder: File) {
-        if (folder.exists()) {
-            val files = folder.listFiles()
-            if (files != null) { // If the folder contains files
-                for (file in files) {
-                    if (file.isDirectory) {
-                        deleteFolder(file) // Recursively delete subfolders
-                    } else {
-                        file.delete() // Delete files
+        try {
+            if (folder.exists()) {
+                val files = folder.listFiles()
+                if (files != null) { // If the folder contains files
+                    for (file in files) {
+                        if (file.isDirectory) {
+                            deleteFolder(file) // Recursively delete subfolders
+                        } else {
+                            file.delete() // Delete files
+                        }
                     }
                 }
+                folder.delete() // Delete the empty folder
             }
-            folder.delete() // Delete the empty folder
+        } catch (e: Exception) {
+            NewRelic.recordHandledException(e)
         }
     }
 

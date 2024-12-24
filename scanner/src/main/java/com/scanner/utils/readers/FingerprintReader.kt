@@ -8,6 +8,7 @@ import android.os.Process
 import android.util.Base64
 import android.util.Log
 import com.google.zxing.BarcodeActivity
+import com.newrelic.agent.android.NewRelic
 import com.nextbiometrics.biometrics.NBBiometricsContext
 import com.nextbiometrics.biometrics.NBBiometricsExtractResult
 import com.nextbiometrics.biometrics.NBBiometricsFingerPosition
@@ -265,6 +266,7 @@ internal class FingerprintReader(
             Log.d("WaxdPosLib", "FingerPrintReader[$readerNo]::Init -> Done")
             true
         } catch (e: Exception) {
+            NewRelic.recordHandledException(e)
             Log.e(
                 "WaxdPosLib",
                 "FingerPrintReader[" + readerNo + "]::Init -> Exception: " + e.message
@@ -292,6 +294,7 @@ internal class FingerprintReader(
             )
             false
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e(
                 "WaxdPosLib",
                 "FingerprintReader[$readerNo]::DetectCard -> Exception -> $e"
@@ -335,6 +338,7 @@ internal class FingerprintReader(
                         "FingerPrintReader[$readerNo]::ReadFinger -> Done"
                     )
                 } catch (e: java.lang.Exception) {
+                    NewRelic.recordHandledException(e)
                     Log.d(
                         "WaxdPosLib",
                         "FingerPrintService::ReadFinger -> Exception: " + e.message
@@ -347,6 +351,7 @@ internal class FingerprintReader(
             )
             true
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e(
                 "WaxdPosLib",
                 "FingerPrintReader[" + readerNo + "]::ReadFinger -> Exception: " + e.message
@@ -361,6 +366,7 @@ internal class FingerprintReader(
             run = false
             true
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e(
                 "WaxdPosLib",
                 "FingerPrintReader[" + readerNo + "]::CancelTap -> Exception " + e.message
@@ -379,6 +385,7 @@ internal class FingerprintReader(
                 reader = null
             }
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             e.printStackTrace()
         }
     }
@@ -392,17 +399,20 @@ internal class FingerprintReader(
 //                reader?.reset()
 
             } catch (ex: NextBiometricsException) {
+                NewRelic.recordHandledException(ex)
                 Log.e(
                     "WaxdPosLib",
                     "FingerPrintReader[$readerNo]::enableLowPowerMode Low power mode enabled"
                 )
             }
         } catch (ex: NextBiometricsException) {
+            NewRelic.recordHandledException(ex)
             Log.e(
                 "WaxdPosLib",
                 "FingerPrintReader[" + readerNo + "]::enableLowPowerMode NEXT Biometrics SDK error EXCEPTION--> " + ex.localizedMessage + "Exception code --> " + ex.code
             )
         } catch (ex: Throwable) {
+            NewRelic.recordHandledException(ex)
             Log.e(
                 "WaxdPosLib",
                 "FingerPrintReader[" + readerNo + "]::enableLowPowerMode EXCEPTION--> " + ex.localizedMessage
@@ -534,6 +544,7 @@ internal class FingerprintReader(
                         reader?.SetBlobParameter(NBDevice.BLOB_PARAMETER_SET_CDK, null)
                         reader?.closeSession()
                     } catch (ex: RuntimeException) {
+                        NewRelic.recordHandledException(ex)
                         Log.e(
                             "WaxdPosLib",
                             "FingerPrintReader[" + readerNo + "]::openSession -> RuntimeException " + ex.message
@@ -583,6 +594,7 @@ internal class FingerprintReader(
                     "FingerprintReader[$readerNo]::Scan -> timeStop = $timeStop"
                 )
             } catch (e: java.lang.Exception) {
+                NewRelic.recordHandledException(e)
                 Log.e(
                     "WaxdPosLib",
                     "FingerprintReader[" + readerNo + "]::Scan -> Exception: " + e.message
@@ -643,6 +655,7 @@ internal class FingerprintReader(
             Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::Scan -> Done")
             true
         } catch (e: NextBiometricsException) {
+            NewRelic.recordHandledException(e)
             Log.d(
                 "WaxdPosLib",
                 "FingerprintReader[" + readerNo + "]::Scan -> Exception: NEXT Biometrics SDK error: " + e.message
@@ -650,6 +663,7 @@ internal class FingerprintReader(
             e.printStackTrace()
             false
         } catch (e: Throwable) {
+            NewRelic.recordHandledException(e)
             Log.d(
                 "WaxdPosLib",
                 "FingerprintReader[" + readerNo + "]::Scan -> Exception: " + e.message
@@ -681,6 +695,7 @@ internal class FingerprintReader(
             listener.onBitmapSaveSuccess(filePath, readerNo)
             true
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e(
                 "WaxdPosLib",
                 "FingerprintReader[" + readerNo + "]::SaveBitmap -> Exception: " + e.message
@@ -722,6 +737,7 @@ internal class FingerprintReader(
             )
             true
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             listener.onFailure(e)
             Log.e(
                 "WaxdPosLib",
@@ -784,6 +800,7 @@ internal class FingerprintReader(
                 }
             }
         } catch (e: Exception) {
+            NewRelic.recordHandledException(e)
             e.printStackTrace()
             Log.d(
                 "WaxdPosLib",
@@ -820,6 +837,7 @@ internal class FingerprintReader(
                     "FingerprintReader[$readerNo]::solveCalibrationData -> Calibration data created"
                 )
             } catch (e: java.lang.Exception) {
+                NewRelic.recordHandledException(e)
                 Log.e(
                     "WaxdPosLib",
                     "FingerprintReader[" + readerNo + "]::solveCalibrationData -> Exception: " + e.message
@@ -838,6 +856,7 @@ internal class FingerprintReader(
                 buf.read(bytes, 0, bytes.size)
                 buf.close()
             } catch (e: IOException) {
+                NewRelic.recordHandledException(e)
                 Log.d(
                     "WaxdPosLib",
                     "FingerprintReader[" + readerNo + "]::solveCalibrationData -> Excetion reading file: " + e.message
@@ -981,6 +1000,7 @@ internal class FingerprintReader(
             }.start()
             true
         } catch (e: Exception) {
+            NewRelic.recordHandledException(e)
             false
         }
 
@@ -995,6 +1015,7 @@ internal class FingerprintReader(
             }.start()
             true
         } catch (e: Exception) {
+            NewRelic.recordHandledException(e)
             false
         }
     }
@@ -1227,10 +1248,14 @@ internal class FingerprintReader(
                 success = true
             }
         } catch (ex: NextBiometricsException) {
+            NewRelic.recordHandledException(ex)
             showMessage("ERROR: NEXT Biometrics SDK error: $ex", true)
+            success = false
             ex.printStackTrace()
         } catch (ex: Throwable) {
+            NewRelic.recordHandledException(ex)
             showMessage("ERROR: " + ex.message, true)
+            success = false
             ex.printStackTrace()
         }
         if (context != null) {
@@ -1243,35 +1268,39 @@ internal class FingerprintReader(
 
     private fun NBBiometricsTemplate.saveTemplate(context: NBBiometricsContext) {
         // Save template
-        val files = File(dirPath)
-        if (files.isDirectory &&
-            (files.listFiles().isNullOrEmpty() || (files.listFiles()?.size ?: 0) <= 1) ||
-            !files.exists()
-        ) {
-            val binaryTemplate = context.saveTemplate(this)
-            this@FingerprintReader.context.encryptData(binaryTemplate, bvnNumber, readerNo) {
-                showMessage(
-                    String.format(
-                        "Extracted template length: %d bytes",
-                        it.size
+        try {
+            val files = File(dirPath)
+            if (files.isDirectory &&
+                (files.listFiles().isNullOrEmpty() || (files.listFiles()?.size ?: 0) <= 1) ||
+                !files.exists()
+            ) {
+                val binaryTemplate = context.saveTemplate(this)
+                this@FingerprintReader.context.encryptData(binaryTemplate, bvnNumber, readerNo) {
+                    showMessage(
+                        String.format(
+                            "Extracted template length: %d bytes",
+                            it.size
+                        )
                     )
-                )
-                val base64Template = Base64.encodeToString(binaryTemplate, 0)
-                showMessage("Extracted template: $base64Template")
+                    val base64Template = Base64.encodeToString(binaryTemplate, 0)
+                    showMessage("Extracted template: $base64Template")
 
-                // Store template to file
+                    // Store template to file
 //                val dirPath = this.context.filesDir.path + "/NBCapturedImages/"
-                files.mkdirs()
+                    files.mkdirs()
 
-                val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.bin"
-                showMessage("Saving ISO template to $filePath")
-                val fos = FileOutputStream(filePath)
-                fos.write(it)
-                fos.close()
+                    val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.bin"
+                    showMessage("Saving ISO template to $filePath")
+                    val fos = FileOutputStream(filePath)
+                    fos.write(it)
+                    fos.close()
 
 
-                listener.onTemplateSaveSuccess(filePath, readerNo)
+                    listener.onTemplateSaveSuccess(filePath, readerNo)
+                }
             }
+        } catch (e: Exception) {
+            NewRelic.recordHandledException(e)
         }
     }
 
@@ -1336,6 +1365,7 @@ internal class FingerprintReader(
             listener.onBitmapSaveSuccess(filePath, readerNo)
             true
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e(
                 "WaxdPosLib",
                 "FingerprintReader[" + readerNo + "]::SaveBitmap -> Exception: " + e.message

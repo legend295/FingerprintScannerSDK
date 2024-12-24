@@ -39,6 +39,8 @@ import com.google.firebase.storage.StorageReference
 import com.google.firebase.storage.ktx.storage
 import com.google.gson.Gson
 import com.google.maps.android.SphericalUtil
+import com.newrelic.agent.android.NewRelic
+import com.newrelic.agent.android.logging.LogLevel
 import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -71,7 +73,6 @@ import com.scanner.utils.transactionOutOfArea
 import com.scanner.utils.verificationDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
@@ -83,6 +84,7 @@ import java.util.Timer
 import java.util.TimerTask
 
 internal class ScannerActivity : AppCompatActivity() {
+
 
     private var tvStatus: AppCompatTextView? = null
     private var tvLeftQuality: AppCompatTextView? = null
@@ -141,6 +143,7 @@ internal class ScannerActivity : AppCompatActivity() {
     // sometimes only one fingerprint get scanned and reader show successfully scanned. So, to solve this issue we are using this variable
     private var areBothFingerprintScannedSuccessfully = HashMap<Int, Boolean>()
     private var fingerprintFiles = HashMap<Int, File>()
+    private var isFingerprintScanningInProgress: Boolean = false
 
     companion object {
         var location: LatLng? = null
@@ -153,8 +156,9 @@ internal class ScannerActivity : AppCompatActivity() {
         list = ArrayList()
         identificationResult.clear()
         verificationDialog = null
-
         // get all users whose FINGER_PRINT_SYNCED_ON_CLOUD is false from cache and upload files
+
+
         getUserFromCache { it, isSuccess ->
             val userDocuments = ArrayList<DocumentSnapshot>()
             if (isSuccess) {
@@ -612,15 +616,15 @@ internal class ScannerActivity : AppCompatActivity() {
             }
 
             ReaderStatus.LOW_POWER_MODE -> {
-                // need to add 8 because sleepModeTrack++ get called 2 times due to 2 fingerprint reader so we need to keep check for 8/2 = 4
-                if (sleepModeTrack > 8) {
+                // need to add 6 because sleepModeTrack++ get called 2 times due to 2 fingerprint reader so we need to keep check for 6/2 = 3
+                if (sleepModeTrack > 6) {
                     sleepModeTrack = 0
                     fingerprintHelper?.setInit(init = false)
                     resetImages()
                     initialize()
                 } else {
                     setMessage("Initializing sensor, please wait...")
-                    handleCancelButtonsVisibility(isVisible = false) // Make the cancel buttons gone.
+                    handleCancelButtonsVisibility(isVisible = true) // Make the cancel buttons gone.
                     setStartButtonMessage(
                         "",
                         isVisible = false
@@ -657,7 +661,7 @@ internal class ScannerActivity : AppCompatActivity() {
      */
     private val onSessionChanges = object : ReaderSessionHelper {
         override fun onSessionChanges(readerStatus: ReaderStatus, data: String?) {
-            this@ScannerActivity.readerStatus = readerStatus
+                this@ScannerActivity.readerStatus = readerStatus
             when (readerStatus) {
                 ReaderStatus.NONE -> {
                     //Initial value of the readers and readers are not initialized in this phase
@@ -837,6 +841,7 @@ internal class ScannerActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         fingerprintHelper?.stop()
+        if (isFingerprintScanningInProgress) fingerprintHelper?.close()
 //        setResult(RESULT_CANCELED)
 //        finish()
     }
@@ -1173,6 +1178,7 @@ internal class ScannerActivity : AppCompatActivity() {
                         areBothFingerprintScannedSuccessfully[readerNo] = true
                         if (checkBothFingersSucceed()) {
 //                            uploadTemplates()
+                            isFingerprintScanningInProgress = false
                             readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
                             setStartButtonMessage("Done", true)
                             handleCancelButtonsVisibility(isVisible = false)
@@ -1265,6 +1271,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private fun NBDeviceScanStatus.handle(previewListenerType: PreviewListenerType, readerNo: Int) {
         println("PreviewListenerType ------------------- reader no - $readerNo ------- ${previewListenerType.name}")
         println("NBDeviceScanStatus ------------------- reader no - $readerNo ------- ${this.name}")
+
         when (this) {
             NBDeviceScanStatus.NONE -> {}
             NBDeviceScanStatus.OK -> {}
@@ -1278,6 +1285,7 @@ internal class ScannerActivity : AppCompatActivity() {
             NBDeviceScanStatus.EMPTY -> {}
             NBDeviceScanStatus.DONE -> {
                 // add check for both readers
+
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
                     // Store reader number here
                     // this login is added in Extraction result
@@ -1313,6 +1321,7 @@ internal class ScannerActivity : AppCompatActivity() {
             }
 
             NBDeviceScanStatus.PUT_FINGER_ON_SENSOR -> {
+                isFingerprintScanningInProgress = true
                 setMessage("Place your fingers on the sensor.")
             }
 

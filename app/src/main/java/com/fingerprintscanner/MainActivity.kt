@@ -11,6 +11,8 @@ import androidx.core.widget.ContentLoadingProgressBar
 import com.fingerprintscanner.utility.showFieldsDialog
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.firebase.firestore.DocumentSnapshot
+import com.newrelic.agent.android.NewRelic
+import com.newrelic.agent.android.logging.LogLevel
 import com.scanner.activity.FingerprintScanner
 import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.Keys
@@ -35,6 +37,9 @@ class MainActivity : AppCompatActivity() {
         progressBar?.hide()
 
         tvStatus = findViewById(R.id.tvStatus)
+
+
+
 
         tvRegistration.setOnClickListener {
             sheet =
