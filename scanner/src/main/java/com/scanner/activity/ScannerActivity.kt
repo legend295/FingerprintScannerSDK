@@ -48,6 +48,8 @@ import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.scanner.app.ScannerApp
 import com.scanner.model.Transaction
 import com.scanner.model.User
+import com.scanner.utils.NewRelicWrapper.logDebug
+import com.scanner.utils.NewRelicWrapper.logError
 import com.scanner.utils.builder.BuilderOptions
 import com.scanner.utils.ReaderStatus
 import com.scanner.utils.builder.ThemeOptions
@@ -406,10 +408,13 @@ internal class ScannerActivity : AppCompatActivity() {
                     } else {
                         hideFingerprintDownloadDialog()
                         handleMessageAndFinish("User not found.")
+                        logDebug("ScannerActivity:: --> User not found...")
                     }
                 }
 
             }
+        }?:run {
+            logDebug("ScannerActivity:: --> Unique Id is null...")
         }
 
     }
@@ -466,6 +471,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     fingerprintHelper?.init()
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    NewRelic.recordHandledException(e)
                 }
             }
         }
@@ -545,6 +551,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 /* if (scanningOptions?.scanningType == ScanningType.REGISTRATION)
                      setMessage("Please put your both fingers on sensor.") // Prompt the user to scan their fingerprints.
                  else setMessage("Please put your both fingers on sensor for verification.")*/
+
                 clearLists()
                 setMessage("Initializing sensor, please wait...")
                 sleepModeTrack = 0
@@ -1010,6 +1017,7 @@ internal class ScannerActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            NewRelic.recordHandledException(e)
         }
     }
 
@@ -1484,7 +1492,9 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
                 .addOnFailureListener {
                     Log.e(ScannerActivity::class.simpleName, "Failed - ${it.message}")
+                    logError("ScannerActivity:: --> User create failed ${it.message}")
                     it.printStackTrace()
+                    NewRelic.recordHandledException(it)
                 }
         }
     }
@@ -1502,6 +1512,8 @@ internal class ScannerActivity : AppCompatActivity() {
             .addOnFailureListener {
                 callback(false)
                 Log.e(ScannerActivity::class.simpleName, "User update failed ${it.message}")
+                logError("ScannerActivity:: --> User update failed ${it.message}")
+                NewRelic.recordHandledException(it)
             }
     }
 
@@ -1518,6 +1530,8 @@ internal class ScannerActivity : AppCompatActivity() {
             .addOnFailureListener {
                 callback(false)
                 Log.e(ScannerActivity::class.simpleName, "User update failed ${it.message}")
+                logError("ScannerActivity:: --> User update failed ${it.message}")
+                NewRelic.recordHandledException(it)
             }
     }
 
@@ -1535,6 +1549,8 @@ internal class ScannerActivity : AppCompatActivity() {
                 callback(false, null)
                 it.printStackTrace()
                 Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
+                logError("ScannerActivity:: --> User fetch failed ${it.message}")
+                NewRelic.recordHandledException(it)
             }
     }
 
@@ -1568,6 +1584,8 @@ internal class ScannerActivity : AppCompatActivity() {
                 callback(false, null)
                 it.printStackTrace()
                 Log.e(ScannerActivity::class.simpleName, "User fetch failed ${it.message}")
+                logError("ScannerActivity:: --> User fetch failed ${it.message}")
+                NewRelic.recordHandledException(it)
             }
     }
 
@@ -1626,6 +1644,8 @@ internal class ScannerActivity : AppCompatActivity() {
         }.addOnFailureListener {
             Log.e(ScannerActivity::class.simpleName, "File upload failed")
             callback(false)
+            logError("ScannerActivity:: --> File upload failed ${it.message}")
+            NewRelic.recordHandledException(it)
         }
     }
 
@@ -1672,6 +1692,8 @@ internal class ScannerActivity : AppCompatActivity() {
         }.addOnFailureListener {
             Log.e(ScannerActivity::class.simpleName, "File upload failed")
             callback(false)
+            logError("ScannerActivity:: --> File upload failed ${it.message}")
+            NewRelic.recordHandledException(it)
         }
     }
 
@@ -1735,6 +1757,8 @@ internal class ScannerActivity : AppCompatActivity() {
             Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
             // THis will finish the activity so we don't need to send callback here
             handleMessageAndFinish("Not able to fetch files")
+            logError("ScannerActivity:: --> File download from firebase storage failed ${it.message}")
+            NewRelic.recordHandledException(it)
         }
 
     }
@@ -1766,6 +1790,8 @@ internal class ScannerActivity : AppCompatActivity() {
                 it.printStackTrace()
                 Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
                 handleMessageAndFinish("Not able to download files")
+                logError("ScannerActivity:: --> save :: File download failed ${it.message}")
+                NewRelic.recordHandledException(it)
 
             }
         }
@@ -1798,6 +1824,8 @@ internal class ScannerActivity : AppCompatActivity() {
                 it.printStackTrace()
                 Log.e(ScannerApp::class.simpleName, "User fetch failed ${it.message}")
                 querySnapShot(null, false)
+                logError("ScannerActivity:: --> getUserFromCache :: Local user fetch failed ${it.message}")
+                NewRelic.recordHandledException(it)
             }
     }
 
@@ -2012,6 +2040,8 @@ internal class ScannerActivity : AppCompatActivity() {
             .addOnFailureListener {
                 Log.e(ScannerActivity::class.simpleName, "Transaction save Failed - ${it.message}")
                 it.printStackTrace()
+                logError("ScannerActivity:: --> saveTransactionToDb :: Save transaction failed ${it.message}")
+                NewRelic.recordHandledException(it)
             }
     }
 
@@ -2068,6 +2098,8 @@ internal class ScannerActivity : AppCompatActivity() {
         storageListRef.addOnSuccessListener {
             callback(it.items.isNotEmpty(), it.items.size)
         }.addOnFailureListener {
+            logError("ScannerActivity:: --> doesFileExistsOnFirebaseStorage :: File exist failed ${it.message}")
+            NewRelic.recordHandledException(it)
             callback(false, 0)
         }
     }

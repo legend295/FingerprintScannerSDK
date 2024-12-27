@@ -12,6 +12,8 @@ import com.nextbiometrics.devices.NBDevice
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.devices.NBDevices
+import com.scanner.utils.NewRelicWrapper.logDebug
+import com.scanner.utils.NewRelicWrapper.logError
 import com.scanner.utils.helper.ReaderSessionHelper
 import com.scanner.utils.ReaderStatus
 import com.scanner.utils.enums.PreviewListenerType
@@ -86,16 +88,20 @@ internal class FingerprintHelper(
     fun init(): Boolean {
         if (scanningType == null || bvnNumber == null) return false
         Log.d("WaxdPosLib", "FingerprintService::Init...")
+        logDebug("FingerprintService::Init...")
         val info = JSONObject()
         init = false
         return try {
             Log.d("WaxdPosLib", "FingerPrintService::Init -> Power USB OFF")
+            logDebug("FingerPrintService::Init -> Power USB OFF")
             PowerControl(context).usbPower(0)
             Thread.sleep(1000)
             Log.d("WaxdPosLib", "FingerPrintService::Init -> Power USB ON")
+            logDebug("FingerPrintService::Init -> Power USB ON")
             PowerControl(context).usbPower(1)
             Thread.sleep(1000)
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize...")
+            logDebug("FingerPrintService::Init -> NBDevices.initialize...")
             /*Log.d(
                 "WaxdPosLib",
                 "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
@@ -104,12 +110,17 @@ internal class FingerprintHelper(
             if (!NBDevices.isInitialized()) {
                 NBDevices.initialize(context)
                 Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing")
+                logDebug("FingerPrintService::Init -> NBDevices initializing")
                 for (i in 0..49) {
                     Thread.sleep(500)
                     Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing $i")
+                    logDebug("FingerPrintService::Init -> NBDevices initializing $i")
                     if (NBDevices.isInitialized()) {
                         Log.d(
                             "WaxdPosLib",
+                            "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
+                        )
+                        logDebug(
                             "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
                         )
                         break
@@ -117,6 +128,9 @@ internal class FingerprintHelper(
                         err = "Device initialization failed."
                         Log.d(
                             "WaxdPosLib",
+                            "FingerPrintService::Init -> No fingerprint reader found"
+                        )
+                        logDebug(
                             "FingerPrintService::Init -> No fingerprint reader found"
                         )
                         readerInfo = "No fingerprint reader"
@@ -129,8 +143,10 @@ internal class FingerprintHelper(
 
             }
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize... Done")
+            logDebug("FingerPrintService::Init -> NBDevices.initialize... Done")
             terminate = true
             Log.d("WaxdPosLib", "FingerPrintService::Init -> Waiting for USB devices ...")
+            logDebug("FingerPrintService::Init -> Waiting for USB devices ...")
             Thread.sleep(1000)
             //            int numDevicesFound = NBDevices.getDevices().length;
             var numDevicesFound = 0
@@ -145,11 +161,13 @@ internal class FingerprintHelper(
                 "WaxdPosLib",
                 "FingerPrintService::Init -> numDevicesFound = $numDevicesFound"
             )
+            logDebug("FingerPrintService::Init -> numDevicesFound = $numDevicesFound")
             devices = NBDevices.getDevices()
             Log.d("WaxdPosLib", "FingerPrintService::Init -> " + devices.size + " devices found")
             if (devices.isEmpty()) {
                 err = "No fingerprint reader found"
                 Log.d("WaxdPosLib", "FingerPrintService::Init -> No fingerprint reader found")
+                logDebug("FingerPrintService::Init -> No fingerprint reader found")
                 readerInfo = "No fingerprint reader"
                 readerStatus = ReaderStatus.INIT_FAILED
                 sessionHelper.onSessionChanges(readerStatus, err)
@@ -172,26 +190,33 @@ internal class FingerprintHelper(
                         "WaxdPosLib",
                         "FingerPrintService::Init -> Init of reader$i failed"
                     )
+                    logDebug("FingerPrintService::Init -> Init of reader$i failed")
                     info.put("reader[$i]", "INIT FAILED")
                 } else {
                     Log.d(
                         "WaxdPosLib",
                         "FingerPrintService::Init -> Init of reader$i was successful"
                     )
+                    logDebug("FingerPrintService::Init -> Init of reader$i was successful")
                     info.put("reader[$i]", JSONObject(reader[i]?.readerInfo() ?: ""))
                     numReaders++
                 }
             }
             readerInfo = info.toString()
             Log.d("WaxdPosLib", "FingerPrintService::Init -> readerInfo = $readerInfo")
+            logDebug("FingerPrintService::Init -> readerInfo = $readerInfo")
             Log.d(
                 "WaxdPosLib",
                 "FingerPrintService::Init -> $numReaders readers initialized"
             )
+            logDebug("FingerPrintService::Init -> $numReaders readers initialized")
             if (numReaders < 2) {
                 err = "Not all readers initialized ($numReaders)"
                 Log.d(
                     "WaxdPosLib",
+                    "FingerPrintService::Init -> Not all readers initialized ($numReaders)"
+                )
+                logDebug(
                     "FingerPrintService::Init -> Not all readers initialized ($numReaders)"
                 )
                 readerStatus = ReaderStatus.INIT_FAILED
@@ -199,7 +224,9 @@ internal class FingerprintHelper(
                 return false
             }
             Log.d("WaxdPosLib", "FingerPrintService::Init -> OK")
+            logDebug("FingerPrintService::Init -> OK")
             Log.d("WaxdPosLib", "FingerprintService::onBind -> readerInfo = $readerInfo")
+            logDebug("FingerprintService::onBind -> readerInfo = $readerInfo")
 //            handler.sendMessage("SERVICE BOUND", readerInfo)
             init = true
             readerStatus = ReaderStatus.SERVICE_BOUND
@@ -209,18 +236,21 @@ internal class FingerprintHelper(
             readerStatus = ReaderStatus.INIT_FAILED
             sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            logError("FingerprintService::Init -> Exception: " + e.message)
             NewRelic.recordHandledException(e)
             false
         } catch (e: ExceptionInInitializerError) {
             readerStatus = ReaderStatus.INIT_FAILED
             sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            logError("FingerprintService::Init -> Exception: " + e.message)
             NewRelic.recordHandledException(e)
             false
         } catch (e: NoClassDefFoundError) {
             readerStatus = ReaderStatus.INIT_FAILED
             sessionHelper.onSessionChanges(readerStatus, e.message ?: readerInfo)
             Log.e("WaxdPosLib", "FingerprintService::Init -> Exception: " + e.message)
+            logError("FingerprintService::Init -> Exception: " + e.message)
             NewRelic.recordHandledException(e)
             false
         }
@@ -228,6 +258,7 @@ internal class FingerprintHelper(
 
     fun start(): Boolean {
         Log.d("WaxdPosLib", "FingerprintService::Start")
+        logDebug("FingerprintService::Start")
         return try {
             reader.forEachIndexed { i, it ->
                 it?.setReader(devices[i])
@@ -239,16 +270,19 @@ internal class FingerprintHelper(
             }
             if (started) {
                 Log.d("WaxdPosLib", "FingerprintService::Start -> already started")
+                logDebug("FingerprintService::Start -> already started")
                 return true
             }
             if (init) {
                 Log.d("WaxdPosLib", "FingerprintService::Start -> already inited")
+                logDebug("FingerprintService::Start -> already inited")
                 started = true
                 return true
             }
             Thread {
                 if (!init()) {
                     Log.e("WaxdPosLib", "FingerprintService::Start -> Init FAILED")
+                    logError("FingerprintService::Start -> Init FAILED")
                     started = false
                     init = false
 //                    handler.sendMessage("INIT FAILED")
@@ -263,12 +297,14 @@ internal class FingerprintHelper(
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.d("WaxdPosLib", "FingerprintService::Start -> Exception " + e.message)
+            logError("FingerprintService::Start -> Exception " + e.message)
             false
         }
     }
 
     fun waitFingerRead(data: String?) {
         Log.d("WaxdPosLib", "FingerprintService::WaitFingerRead -> data = $data")
+        logDebug("FingerprintService::WaitFingerRead -> data = $data")
         level = defaultLevel
         timeout = defaultTimeout
         compression = defaultCompression
@@ -280,10 +316,14 @@ internal class FingerprintHelper(
                     "WaxdPosLib",
                     "FingerprintService::WaitFingerRead -> splitting data into fields"
                 )
+                logDebug("FingerprintService::WaitFingerRead -> splitting data into fields")
                 val fields = data.split(",".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
                 val numFields = fields.size
                 Log.d(
                     "WaxdPosLib",
+                    "FingerprintService::WaitFingerRead -> splitting data into fields -> $numFields fields"
+                )
+                logDebug(
                     "FingerprintService::WaitFingerRead -> splitting data into fields -> $numFields fields"
                 )
                 if (numFields > 0) {
@@ -294,6 +334,7 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> level = $level"
                         )
+                        logDebug("FingerprintService::WaitFingerRead -> level = $level")
                     }
                 }
                 if (numFields > 1) {
@@ -304,6 +345,7 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> timeout = $timeout"
                         )
+                        logDebug("FingerprintService::WaitFingerRead -> timeout = $timeout")
                     }
                 }
                 if (numFields > 2) {
@@ -314,6 +356,7 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> compression = $compression"
                         )
+                        logDebug("FingerprintService::WaitFingerRead -> compression = $compression")
                     }
                 }
                 if (numFields > 3) {
@@ -325,11 +368,14 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> savePathStr = $savePath"
                         )
+                        logDebug("FingerprintService::WaitFingerRead -> savePathStr = $savePath")
                     }
                 }
             }
         } catch (e: java.lang.Exception) {
+            NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::WaitFingerRead -> Exception " + e.message)
+            logError("FingerprintService::WaitFingerRead -> Exception " + e.message)
         }
         try {
             Thread {
@@ -344,12 +390,14 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> Fingers Detected -> Reading ..."
                         )
+                        logDebug("FingerprintService::WaitFingerRead -> Fingers Detected -> Reading ...")
                         readFingers(level, compression, savePath)
                     } else {
                         Log.d(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> Fingers Detected -> TAP CANCELLED ..."
                         )
+                        logDebug("FingerprintService::WaitFingerRead -> Fingers Detected -> TAP CANCELLED ...")
 //                        handler.sendMessage("TAP CANCELLED")
                         readerStatus = ReaderStatus.TAP_CANCELLED
                         sessionHelper.onSessionChanges(readerStatus, "")
@@ -360,6 +408,7 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> Fingers Detection FAILED -> SESSION CLOSED"
                         )
+                        logError("FingerprintService::WaitFingerRead -> Fingers Detection FAILED -> SESSION CLOSED")
 //                        handler.sendMessage("SESSION CLOSED")
                         readerStatus = ReaderStatus.SESSION_CLOSED
                         sessionHelper.onSessionChanges(readerStatus, "")
@@ -370,6 +419,7 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> Fingers Detection FAILED ..."
                         )
+                        logError("FingerprintService::WaitFingerRead -> Fingers Detection FAILED ...")
                         err = "FINGERS NOT DETECTED"
                         val data: String =
                             "${reader[0]!!.getDetectLevel()},${reader[1]!!.getDetectLevel()}"
@@ -381,15 +431,18 @@ internal class FingerprintHelper(
                             "WaxdPosLib",
                             "FingerprintService::WaitFingerRead -> Fingers Detection FAILED -> TAP CANCELLED"
                         )
+                        logError("FingerprintService::WaitFingerRead -> Fingers Detection FAILED -> TAP CANCELLED")
 //                        handler.sendMessage("TAP CANCELLED")
                         readerStatus = ReaderStatus.TAP_CANCELLED
                         sessionHelper.onSessionChanges(readerStatus, "")
                     }
                 }
                 Log.d("WaxdPosLib", "FingerprintService::WaitFingerTap -> Done")
+                logDebug("FingerprintService::WaitFingerTap -> Done")
             }.start()
         } catch (e: java.lang.Exception) {
             Log.d("WaxdPosLib", "FingerprintService::WaitFingerTap -> Exception " + e.message)
+            logError("FingerprintService::WaitFingerTap -> Exception " + e.message)
         }
     }
 
@@ -407,6 +460,7 @@ internal class FingerprintHelper(
 
     fun close() {
         Log.d("WaxdPosLib", "FingerPrintService::Close...")
+        logDebug("FingerPrintService::Close...")
         try {
             for (i in 0 until numReaders) {
                 if (reader[i] != null) {
@@ -422,18 +476,21 @@ internal class FingerprintHelper(
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::Close -> Exception: " + e.message)
+            logError("FingerprintService::Close -> Exception: " + e.message)
         }
     }
 
     fun cancelTap() {
         try {
             Log.d("WaxdPosLib", "FingerprintService::CancelTap")
+            logDebug("FingerprintService::CancelTap")
             cancelled = true
             reader[0]!!.cancelTap()
             reader[1]!!.cancelTap()
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::CancelTap -> Exception " + e.message)
+            logError("FingerprintService::CancelTap -> Exception " + e.message)
         }
     }
 
@@ -442,9 +499,11 @@ internal class FingerprintHelper(
             Log.d("WaxdPosLib", "FingerprintService::enableLowPowerMode")
             reader[0]?.enableLowPowerMode()
             reader[1]?.enableLowPowerMode()
+            logDebug("FingerprintService::enableLowPowerMode")
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::enableLowPowerMode -> Exception " + e.message)
+            logError("FingerprintService::enableLowPowerMode -> Exception " + e.message)
         }
     }
 
@@ -463,6 +522,7 @@ internal class FingerprintHelper(
         callback: (Boolean) -> Unit
     ): Boolean {
         Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect")
+        logDebug("FingerPrintService::WaitFingersDetect")
         cancelled = false
         return try {
             run = true
@@ -475,17 +535,20 @@ internal class FingerprintHelper(
                         "WaxdPosLib",
                         "FingerPrintService::WaitFingersDetect -> Reader session is closed."
                     )
+                    logError("FingerPrintService::WaitFingersDetect -> Reader session is closed.")
                     callback(false)
                     return false
                 }
                 if (reader[0]?.detectFinger(level) == true && reader[1]?.detectFinger(level) == true) {
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Finger Detected")
+                    logDebug("FingerPrintService::WaitFingersDetect -> Finger Detected")
                     run = false
                     callback(true)
                     return true
                 }
                 if (timeout > 0 && System.currentTimeMillis() - s > timeout * 1000) {
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> timeout")
+                    logError("FingerPrintService::WaitFingersDetect -> timeout")
                     run = false
                     callback(false)
                     return false
@@ -494,19 +557,23 @@ internal class FingerprintHelper(
                     Thread.sleep(2000)
                 } catch (e: InterruptedException) {
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Interrupted")
+                    logError("FingerPrintService::WaitFingersDetect -> Interrupted")
                     run = false
                     callback(false)
                     return false
                 }
                 Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Still waiting ... ")
+                logDebug("FingerPrintService::WaitFingersDetect -> Still waiting ... ")
             }
             run = false
             callback(false)
             Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Done")
+            logDebug("FingerPrintService::WaitFingersDetect -> Done")
             false
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Exception: " + e.message)
+            logError("FingerPrintService::WaitFingersDetect -> Exception: " + e.message)
             callback(false)
             false
         }
@@ -522,6 +589,7 @@ internal class FingerprintHelper(
         val isSecondOpen: Boolean
         try {
             Log.d("WaxdPosLib", "FingerprintService::isSessionOpen")
+            logDebug("FingerprintService::isSessionOpen")
             isFirstOpen = reader[0]?.isSessionOpen() ?: false
             isSecondOpen = reader[1]?.isSessionOpen() ?: false
             if (isFirstOpen && isSecondOpen) {
@@ -538,6 +606,9 @@ internal class FingerprintHelper(
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerprintService::isSessionOpen -> Exception " + e.message)
+            logError("FingerprintService::isSessionOpen -> Exception " + e.message)
+            init = false
+            started = false
 //            handler.sendMessage("SESSION CLOSED")
             readerStatus = ReaderStatus.SESSION_CLOSED
             sessionHelper.onSessionChanges(readerStatus)
@@ -563,6 +634,7 @@ internal class FingerprintHelper(
 
     private fun waitFingersDetect(level: Int, timeout: Int): Boolean {
         Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect")
+        logDebug("FingerPrintService::WaitFingersDetect")
         cancelled = false
         return try {
             run = true
@@ -574,15 +646,18 @@ internal class FingerprintHelper(
                         "WaxdPosLib",
                         "FingerPrintService::WaitFingersDetect -> Reader session is closed."
                     )
+                    logError("FingerPrintService::WaitFingersDetect -> Reader session is closed.")
                     return false
                 }
                 if (reader[0]?.detectFinger(level) == true && reader[1]?.detectFinger(level) == true) {
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Finger Detected")
+                    logDebug("FingerPrintService::WaitFingersDetect -> Finger Detected")
                     run = false
                     return true
                 }
                 if (timeout > 0 && System.currentTimeMillis() - s > timeout * 1000) {
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> timeout")
+                    logError("FingerPrintService::WaitFingersDetect -> timeout")
                     run = false
                     return false
                 }
@@ -590,23 +665,28 @@ internal class FingerprintHelper(
                     Thread.sleep(2000)
                 } catch (e: InterruptedException) {
                     Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Interrupted")
+                    logError("FingerPrintService::WaitFingersDetect -> Interrupted")
                     run = false
                     return false
                 }
                 Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Still waiting ... ")
+                logDebug("FingerPrintService::WaitFingersDetect -> Still waiting ... ")
             }
             run = false
             Log.d("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Done")
+            logDebug("FingerPrintService::WaitFingersDetect -> Done")
             false
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerPrintService::WaitFingersDetect -> Exception: " + e.message)
+            logError("FingerPrintService::WaitFingersDetect -> Exception: " + e.message)
             false
         }
     }
 
     fun readFingers(level: Int, compression: Double, path: String?) {
         Log.d("WaxdPosLib", "FingerprintService::ReadFingers")
+        logDebug("FingerprintService::ReadFingers")
         released = false
         try {
             reader[0]!!.done = false
@@ -622,6 +702,7 @@ internal class FingerprintHelper(
                     "WaxdPosLib",
                     "FingerprintService::WaitFingerTap FAILED -> err = $err"
                 )
+                logError("FingerprintService::WaitFingerTap FAILED -> err = $err")
 //                handler.sendMessage("FINGERS READ FAILED", err)
                 readerStatus = ReaderStatus.FINGERS_READ_FAILED
                 sessionHelper.onSessionChanges(readerStatus, err)
@@ -629,6 +710,7 @@ internal class FingerprintHelper(
 
             }
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> waiting for taps")
+            logDebug("FingerPrintService::ReadFingers -> waiting for taps")
             try {
                 while (!(reader[0]!!.done && reader[1]!!.done)) {
                     Thread.sleep(100)
@@ -636,8 +718,11 @@ internal class FingerprintHelper(
             } catch (e: InterruptedException) {
                 NewRelic.recordHandledException(e)
                 Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> Interrupt Exception ...")
+                logError("FingerPrintService::ReadFingers -> Interrupt Exception ...")
             }
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> while done ...")
+            logDebug("FingerPrintService::ReadFingers -> while done ...")
+
             var fingersRead = 0
             if (reader[0]!!.getFingerRead()) fingersRead++
             if (reader[1]!!.getFingerRead()) fingersRead++
@@ -647,6 +732,7 @@ internal class FingerprintHelper(
                     "WaxdPosLib",
                     "FingerprintService::ReadFingers -> FAILED -> err = $err"
                 )
+                logError("FingerprintService::ReadFingers -> FAILED -> err = $err")
 //                handler.sendMessage("FINGERS READ FAILED", err)
                 readerStatus = ReaderStatus.FINGERS_READ_FAILED
                 sessionHelper.onSessionChanges(readerStatus, err)
@@ -658,9 +744,11 @@ internal class FingerprintHelper(
             }
             released = false
             Log.d("WaxdPosLib", "FingerPrintService::ReadFingers -> Done")
+            logDebug("FingerPrintService::ReadFingers -> Done")
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
             Log.e("WaxdPosLib", "FingerPrintService::ReadFingers -> Exception: " + e.message)
+            logError("FingerPrintService::ReadFingers -> Exception: " + e.message)
         }
     }
 
@@ -719,40 +807,6 @@ internal class FingerprintHelper(
         }
     }
 
-    private fun checkReaderState() {
-        when (reader[0]?.getReaderState()) {
-            NBDeviceState.NOT_CONNECTED -> {
-                println("reader[0] -------- Not Connected")
-            }
-
-            NBDeviceState.NOT_AWAKE -> {
-                println("reader[0] -------- Not Awake")
-            }
-
-            NBDeviceState.AWAKE -> {
-                println("reader[0] -------- Awake")
-            }
-
-            null -> {}
-        }
-
-        when (reader[1]?.getReaderState()) {
-            NBDeviceState.NOT_CONNECTED -> {
-                println("reader[1] -------- Not Connected")
-            }
-
-            NBDeviceState.NOT_AWAKE -> {
-                println("reader[1] -------- Not Awake")
-            }
-
-            NBDeviceState.AWAKE -> {
-                println("reader[1] -------- Awake")
-            }
-
-            null -> {}
-        }
-    }
-
     private fun deleteFolder(folder: File) {
         try {
             if (folder.exists()) {
@@ -770,6 +824,8 @@ internal class FingerprintHelper(
             }
         } catch (e: Exception) {
             NewRelic.recordHandledException(e)
+            Log.e("WaxdPosLib", "FingerprintService::DeleteFolder -> Exception: " + e.message)
+            logError("FingerprintService::DeleteFolder -> Exception: " + e.message)
         }
     }
 
