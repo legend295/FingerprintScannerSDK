@@ -9,6 +9,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.widget.ContentLoadingProgressBar
 import com.fingerprintscanner.utility.showFieldsDialog
+import com.github.legend295.fingerprintscanner.BuildConfig
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.firebase.firestore.DocumentSnapshot
 import com.newrelic.agent.android.NewRelic
@@ -144,6 +145,7 @@ class MainActivity : AppCompatActivity() {
             .setCustomData(JSONObject().apply {
                 put("pin", 1234)
             })
+            .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
             .skipLocation(skipLocation = true)
             .start(this, scanningLauncher)
 

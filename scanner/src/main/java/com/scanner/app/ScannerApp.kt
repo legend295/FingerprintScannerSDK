@@ -28,9 +28,9 @@ internal class ScannerApp : Application() {
         super.onCreate()
         instance = this
 
-        NewRelic.withApplicationToken(
+        /*NewRelic.withApplicationToken(
             BuildConfig.NEW_RELIC_TOKEN
-        ).withLoggingEnabled(true).withCrashReportingEnabled(true).start(this)
+        ).withLoggingEnabled(true).withCrashReportingEnabled(true).start(this)*/
     }
 
 

@@ -80,6 +80,11 @@ class FingerprintScanner {
             return this
         }
 
+        fun newRelicToken(newRelicToken: String): Builder {
+            options.newRelicToken = newRelicToken
+            return this
+        }
+
 
         fun start(
             activity: Activity,

@@ -17,6 +17,7 @@ internal class BuilderOptions {
     var themeOptions: ThemeOptions? = null
     var customObject: JSONObject? = null
     var skipLocation: Boolean = false
+    var newRelicToken: String? = null
 //    var firebaseFireStore: FirebaseFirestore? = null
 }
 

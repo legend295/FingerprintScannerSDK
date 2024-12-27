@@ -27,6 +27,7 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.github.legend295.fingerprintscanner.BuildConfig
 import com.github.legend295.fingerprintscanner.R
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.DocumentSnapshot
@@ -190,6 +191,14 @@ internal class ScannerActivity : AppCompatActivity() {
         skipLocation = scanningOptions?.skipLocation ?: false
 
         setCustomTheme(scanningOptions?.themeOptions)
+
+        // Initialize New Relic
+        scanningOptions?.newRelicToken?.let {
+            NewRelic.withApplicationToken(
+                it
+            ).withLoggingEnabled(true).withCrashReportingEnabled(true).start(this)
+        }
+
 
         /*  doWeNeedToReinitialize = true
           fingerprintHelper = FingerprintHelper(
