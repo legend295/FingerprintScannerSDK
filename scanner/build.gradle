@@ -12,7 +12,7 @@ plugins {
 
 def localProperties = new Properties()
 localProperties.load(new FileInputStream(rootProject.file("local.properties")))
-def newRelicToken = project.findProperty("com.newrelic.application_token") ?: ""
+def newRelicToken = project.findProperty("newrelic.application_token") ?: ""
 
 android {
     namespace 'com.github.legend295.fingerprintscanner'
