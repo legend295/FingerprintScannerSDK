@@ -2,6 +2,9 @@ package com.scanner.utils.readers
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.CountDownTimer
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.common.apiutil.powercontrol.PowerControl
 import com.newrelic.agent.android.NewRelic
@@ -59,6 +62,8 @@ internal class FingerprintHelper(
     private lateinit var listener: OnFileSavedListener
     private lateinit var fingerprintListener: FingerprintListener
     private lateinit var devices: Array<NBDevice>
+    private var countDownTimer: CountDownTimer? = null
+    private var isCountDownThroughTimer = false
 
     init {
 //        sessionHelper.onSessionChanges(readerStatus, "")
@@ -85,6 +90,29 @@ internal class FingerprintHelper(
         this.init = init
     }
 
+    private fun startTimer() {
+        if (countDownTimer != null) {
+            isCountDownThroughTimer = true
+            countDownTimer?.cancel()
+            countDownTimer = null
+        }
+        isCountDownThroughTimer = false
+        Log.d("WaxdPosLib", "FingerPrintService::Init -> Timer started")
+        countDownTimer = object : CountDownTimer(15000, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                Log.d("WaxdPosLib", "FingerPrintService::Init -> millisUntilFinished - $millisUntilFinished")
+            }
+
+            override fun onFinish() {
+                if (!isCountDownThroughTimer) {
+                    readerInfo = "No fingerprint reader"
+                    readerStatus = ReaderStatus.INIT_FAILED
+                    sessionHelper.onSessionChanges(readerStatus, err)
+                }
+            }
+        }.start()
+    }
+
     fun init(): Boolean {
         if (scanningType == null || bvnNumber == null) return false
         Log.d("WaxdPosLib", "FingerprintService::Init...")
@@ -92,6 +120,9 @@ internal class FingerprintHelper(
         val info = JSONObject()
         init = false
         return try {
+            Handler(Looper.getMainLooper()).post {
+                startTimer()
+            }
             Log.d("WaxdPosLib", "FingerPrintService::Init -> Power USB OFF")
             logDebug("FingerPrintService::Init -> Power USB OFF")
             PowerControl(context).usbPower(0)
@@ -133,6 +164,8 @@ internal class FingerprintHelper(
                         logDebug(
                             "FingerPrintService::Init -> No fingerprint reader found"
                         )
+                        isCountDownThroughTimer = true
+                        countDownTimer?.cancel()
                         readerInfo = "No fingerprint reader"
                         readerStatus = ReaderStatus.INIT_FAILED
                         sessionHelper.onSessionChanges(readerStatus, err)
@@ -143,6 +176,8 @@ internal class FingerprintHelper(
 
             }
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize... Done")
+            isCountDownThroughTimer = true
+            countDownTimer?.cancel()
             logDebug("FingerPrintService::Init -> NBDevices.initialize... Done")
             terminate = true
             Log.d("WaxdPosLib", "FingerPrintService::Init -> Waiting for USB devices ...")

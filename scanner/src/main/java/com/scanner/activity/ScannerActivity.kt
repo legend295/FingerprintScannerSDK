@@ -348,8 +348,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 override fun onFinish() {
                     dialog.dismiss()
                     if (location == null)
-                        handleMessage("Unable to fetch current location. Please restart the application") {
-                            finish()
+//                        handleMessage("Unable to fetch current location. Please restart the application") {
+                        handleMessage("Unable to fetch current location.") {
+//                            finish()
+                            init()
                         }
                     else {
                         init()
@@ -357,9 +359,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
             }.start()
         } else {
-            handleMessage("Please enable location permissions in your settings. User registration requires location access.") {
+            init()
+            /*handleMessage("Please enable location permissions in your settings. User registration requires location access.") {
                 handleLocationEmpty()
-            }
+            }*/
         }
     }
 
@@ -384,33 +387,43 @@ internal class ScannerActivity : AppCompatActivity() {
                 } else {
                     if (userFound) {
                         user?.let {
-                            // When there are no gps co-ordinates over firebase then show toast and finish
-                            if (user.gpsCoordinates.isNullOrEmpty() || user.gpsCoordinates?.get(0) == null || user.gpsCoordinates?.get(
-                                    1
-                                ) == null
-                            ) {
-                                handleMessageAndFinish("User's co-ordinates not found.")
-                            } else if (location == null && !skipLocation) {
-                                handleLocationEmpty()
+                            if (skipLocation) {
+                                handleInitialization()
                             } else {
-                                // Get user's co-ordinates and create LatLng to check distance
-                                val latLng = LatLng(
-                                    user.gpsCoordinates?.get(0) ?: 0.0,
-                                    user.gpsCoordinates?.get(1) ?: 0.0
-                                )
-
-                                // Calculate distance
-                                val distanceInMeter =
-                                    SphericalUtil.computeDistanceBetween(location, latLng)
-
-                                // Check distance
-                                if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
-                                    transactionOutOfArea(scanningOptions?.themeOptions) {
-                                        finish()
-                                    }
-                                } else {
+                                // When there are no gps co-ordinates over firebase then show toast and finish
+                                if (user.gpsCoordinates.isNullOrEmpty() || user.gpsCoordinates?.get(
+                                        0
+                                    ) == null || user.gpsCoordinates?.get(
+                                        1
+                                    ) == null
+                                ) {
+//                                    handleMessageAndFinish("User's co-ordinates not found.")
                                     handleInitialization()
+                                } else if (location == null && !skipLocation) {
+//                                    handleLocationEmpty()
+                                    handleInitialization()
+                                } else {
+                                    // Get user's co-ordinates and create LatLng to check distance
+                                    val latLng = LatLng(
+                                        user.gpsCoordinates?.get(0) ?: 0.0,
+                                        user.gpsCoordinates?.get(1) ?: 0.0
+                                    )
 
+                                    // Calculate distance
+                                    val distanceInMeter =
+                                        SphericalUtil.computeDistanceBetween(location, latLng)
+
+                                    // Check distance
+                                  /*  if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
+                                        transactionOutOfArea(scanningOptions?.themeOptions) {
+                                            finish()
+                                        }
+                                    } else {
+                                        handleInitialization()
+
+                                    }*/
+                                    // todo remove if want to enable area check for transaction
+                                    handleInitialization()
                                 }
                             }
                         }
@@ -422,7 +435,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
 
             }
-        }?:run {
+        } ?: run {
             logDebug("ScannerActivity:: --> Unique Id is null...")
         }
 
@@ -677,7 +690,7 @@ internal class ScannerActivity : AppCompatActivity() {
      */
     private val onSessionChanges = object : ReaderSessionHelper {
         override fun onSessionChanges(readerStatus: ReaderStatus, data: String?) {
-                this@ScannerActivity.readerStatus = readerStatus
+            this@ScannerActivity.readerStatus = readerStatus
             when (readerStatus) {
                 ReaderStatus.NONE -> {
                     //Initial value of the readers and readers are not initialized in this phase
@@ -692,7 +705,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     setMessage(getString(R.string.scan))
                     // if skip location is false then check for location else skip location check
                     if (location == null && !skipLocation) {
-                        handleLocationEmpty()
+//                        handleLocationEmpty()
                         runOnUiThread {
                             setStartButtonMessage("Start Scan", true)
                             getDialog()?.dismiss()

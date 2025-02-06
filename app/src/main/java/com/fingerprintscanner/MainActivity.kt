@@ -28,6 +28,15 @@ class MainActivity : AppCompatActivity() {
     private var tvStatus: AppCompatTextView? = null
     private var sheet: BottomSheetDialog? = null
     private var progressBar: ContentLoadingProgressBar? = null
+    private val themeOptions = ThemeOptions().apply {
+        buttonColor = R.color.black
+        buttonTextColor = R.color.white
+        messageColor = R.color.black
+        titleTextColor = R.color.black
+        contentTextColor = R.color.black
+        buttonBackground = R.drawable.bg_round_white
+        popUpBackground = R.drawable.bg_round_white
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +107,9 @@ class MainActivity : AppCompatActivity() {
                 FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
                     .setAmount(amount.toInt())
                     .setScanningType(ScanningType.VERIFICATION)
+                    .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
+                    .skipLocation(skipLocation = false)
+                    .setThemeOptions(themeOptions)
                     .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
                     .start(this, scanningLauncher)
             }
@@ -127,15 +139,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRegistration(bvnNumber: String, phoneNumber: String) {
-        val themeOptions = ThemeOptions().apply {
-            buttonColor = R.color.black
-            buttonTextColor = R.color.white
-            messageColor = R.color.black
-            titleTextColor = R.color.black
-            contentTextColor = R.color.black
-            buttonBackground = R.drawable.bg_round_white
-            popUpBackground = R.drawable.bg_round_white
-        }
+
 
         FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
             .setPhoneNumber(phoneNumber)
@@ -146,7 +150,7 @@ class MainActivity : AppCompatActivity() {
                 put("pin", 1234)
             })
             .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
-            .skipLocation(skipLocation = true)
+            .skipLocation(skipLocation = false)
             .start(this, scanningLauncher)
 
     }
