@@ -141,7 +141,8 @@ class MainActivity : AppCompatActivity() {
     private fun startRegistration(bvnNumber: String, phoneNumber: String) {
 
 
-        FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
+        FingerprintScanner.Builder(this)
+            .setUniqueId(bvnNumber)
             .setPhoneNumber(phoneNumber)
             .setScanningType(ScanningType.REGISTRATION)
             .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
