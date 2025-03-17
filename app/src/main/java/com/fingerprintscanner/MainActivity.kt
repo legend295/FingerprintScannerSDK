@@ -145,6 +145,7 @@ class MainActivity : AppCompatActivity() {
             .setUniqueId(bvnNumber)
             .setPhoneNumber(phoneNumber)
             .setScanningType(ScanningType.REGISTRATION)
+            .storagePath("biometrics/")
             .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
             .setThemeOptions(themeOptions)
             .setCustomData(JSONObject().apply {

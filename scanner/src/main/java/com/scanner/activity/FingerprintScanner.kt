@@ -85,6 +85,11 @@ class FingerprintScanner {
             return this
         }
 
+        fun storagePath(path: String): Builder {
+            options.storagePath = path
+            return this
+        }
+
 
         fun start(
             activity: Activity,
@@ -159,7 +164,7 @@ class FingerprintScanner {
         context: Context,
         uniqueId: String,
         callback: (Boolean) -> Unit
-    ) = ScannerActivity().deleteFilesFromFirebaseStorage(context,uniqueId, callback)
+    ) = ScannerActivity().deleteFilesFromFirebaseStorage(context, uniqueId, callback)
 
     fun queryUserByKeyValue(
         queryMap: HashMap<String, Any>,

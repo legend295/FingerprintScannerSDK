@@ -148,8 +148,11 @@ internal class ScannerActivity : AppCompatActivity() {
     private var fingerprintFiles = HashMap<Int, File>()
     private var isFingerprintScanningInProgress: Boolean = false
 
+    private var storagePath = STORAGE_PATH
+
     companion object {
         var location: LatLng? = null
+        const val STORAGE_PATH = "biometrics/"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -227,6 +230,7 @@ internal class ScannerActivity : AppCompatActivity() {
         scanningOptions?.uniqueId?.let { fingerprintHelper?.setBvnNumber(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
+        storagePath = scanningOptions?.storagePath ?: STORAGE_PATH
 
         // if we are not skipping the location then fetch user's location
         if (!skipLocation)
@@ -374,7 +378,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 currentUser = user
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
                     val storageListRef =
-                        storageRef.child("${bvnNumber}/").listAll()
+                        storageRef.child("$storagePath${bvnNumber}/").listAll()
                     runBlocking {
                         if (userFound && user?.fingerPrintSyncedOnCloud == true && storageListRef.await().items.size == 2) {
                             handleMessageAndFinish("The user is already registered with entered Unique number. Please try with new BVN.")
@@ -414,14 +418,14 @@ internal class ScannerActivity : AppCompatActivity() {
                                         SphericalUtil.computeDistanceBetween(location, latLng)
 
                                     // Check distance
-                                  /*  if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
-                                        transactionOutOfArea(scanningOptions?.themeOptions) {
-                                            finish()
-                                        }
-                                    } else {
-                                        handleInitialization()
+                                    /*  if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
+                                          transactionOutOfArea(scanningOptions?.themeOptions) {
+                                              finish()
+                                          }
+                                      } else {
+                                          handleInitialization()
 
-                                    }*/
+                                      }*/
                                     // todo remove if want to enable area check for transaction
                                     handleInitialization()
                                 }
@@ -1636,7 +1640,7 @@ internal class ScannerActivity : AppCompatActivity() {
         uri: Uri,
         callback: (Boolean) -> Unit
     ) {
-        val fileRef = storageRef.child("${bvnNumber}/${uri.lastPathSegment}")
+        val fileRef = storageRef.child("$storagePath${bvnNumber}/${uri.lastPathSegment}")
         val uploadTask = fileRef.putFile(uri)
 
         uploadTask.addOnProgressListener {
@@ -1684,7 +1688,7 @@ internal class ScannerActivity : AppCompatActivity() {
         uri: Uri,
         callback: (Boolean) -> Unit
     ) {
-        val fileRef = storageRef.child("${bvnNumber}/${uri.lastPathSegment}")
+        val fileRef = storageRef.child("$storagePath${bvnNumber}/${uri.lastPathSegment}")
         val uploadTask = fileRef.putFile(uri)
 
         uploadTask.addOnProgressListener {
@@ -1739,7 +1743,7 @@ internal class ScannerActivity : AppCompatActivity() {
             }
             files.listFiles()?.forEach {
                 val uri = Uri.fromFile(it)
-                val fileRef = storageRef.child("${uniqueId}/${uri.lastPathSegment}")
+                val fileRef = storageRef.child("$storagePath${uniqueId}/${uri.lastPathSegment}")
                 fileRef.delete().addOnSuccessListener {
                     callback(true)
                 }.addOnFailureListener {
@@ -1755,7 +1759,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun downloadFilesFromFirebaseStorage(callback: (Boolean) -> Unit) {
         val storageList = ArrayList<StorageReference>()
-        val storageListRef = storageRef.child("${scanningOptions?.uniqueId!!}/").listAll()
+        val storageListRef = storageRef.child("$storagePath${scanningOptions?.uniqueId!!}/").listAll()
         storageListRef.addOnSuccessListener {
             if (it.items.isNotEmpty()) {
                 it.items.forEach { reference ->
@@ -1962,7 +1966,7 @@ internal class ScannerActivity : AppCompatActivity() {
     ) {
         user?.apply {
             val storageListRef =
-                storageRef.child("${user.uniqueId!!}/").listAll()
+                storageRef.child("$storagePath${user.uniqueId!!}/").listAll()
             runBlocking {
                 val items = storageListRef.await().items
                 if (items.isEmpty()) {
@@ -2115,7 +2119,7 @@ internal class ScannerActivity : AppCompatActivity() {
      * */
     fun doesFileExistsOnFirebaseStorage(uniqueId: String, callback: (Boolean, Int) -> Unit) {
         val storageListRef =
-            storageRef.child("${uniqueId}/").listAll()
+            storageRef.child("$storagePath${uniqueId}/").listAll()
 
         storageListRef.addOnSuccessListener {
             callback(it.items.isNotEmpty(), it.items.size)
