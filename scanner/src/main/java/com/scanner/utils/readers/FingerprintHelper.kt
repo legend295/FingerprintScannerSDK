@@ -57,6 +57,7 @@ internal class FingerprintHelper(
     private var savePath: String? = defaultSavePath
     private var scanningType: ScanningType? = null
     private var bvnNumber: String? = null
+    private var skipFirebaseActions: Boolean = false
     private lateinit var sessionHelper: ReaderSessionHelper
     private lateinit var listOfTemplate: ArrayList<NBBiometricsTemplate>
     private lateinit var listener: OnFileSavedListener
@@ -100,7 +101,10 @@ internal class FingerprintHelper(
         Log.d("WaxdPosLib", "FingerPrintService::Init -> Timer started")
         countDownTimer = object : CountDownTimer(15000, 1000) {
             override fun onTick(millisUntilFinished: Long) {
-                Log.d("WaxdPosLib", "FingerPrintService::Init -> millisUntilFinished - $millisUntilFinished")
+                Log.d(
+                    "WaxdPosLib",
+                    "FingerPrintService::Init -> millisUntilFinished - $millisUntilFinished"
+                )
             }
 
             override fun onFinish() {
@@ -219,7 +223,10 @@ internal class FingerprintHelper(
                 reader[i]?.setOnFileSaveListener(listener)
                 reader[i]?.setListener(fingerListener)
                 reader[i]?.setScanningType(scanningType!!)
-                reader[i]?.setBvnNumber(bvnNumber!!)
+                bvnNumber?.let {
+                    reader[i]?.setBvnNumber(it)
+                }
+                reader[i]?.setSkipFirebaseActions(skipFirebaseActions)
                 if (reader[i]?.init() != true) {
                     Log.d(
                         "WaxdPosLib",
@@ -301,7 +308,10 @@ internal class FingerprintHelper(
                 it?.setOnFileSaveListener(listener)
                 it?.setListener(fingerListener)
                 it?.setScanningType(scanningType!!)
-                it?.setBvnNumber(bvnNumber!!)
+                bvnNumber?.let { number ->
+                    it?.setBvnNumber(number)
+                }
+                it?.setSkipFirebaseActions(skipFirebaseActions)
             }
             if (started) {
                 Log.d("WaxdPosLib", "FingerprintService::Start -> already started")
@@ -919,5 +929,9 @@ internal class FingerprintHelper(
 
     fun setScanningType(scanningType: ScanningType) {
         this.scanningType = scanningType
+    }
+
+    fun setSkipFirebaseActions(skipFirebaseActions: Boolean) {
+        this.skipFirebaseActions = skipFirebaseActions
     }
 }

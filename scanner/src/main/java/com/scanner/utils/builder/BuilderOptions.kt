@@ -19,6 +19,7 @@ internal class BuilderOptions {
     var skipLocation: Boolean = false
     var newRelicToken: String? = null
     var storagePath: String? = null
+    var skipFirebaseActions: Boolean = false
 //    var firebaseFireStore: FirebaseFirestore? = null
 }
 

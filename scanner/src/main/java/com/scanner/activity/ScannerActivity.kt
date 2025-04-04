@@ -27,7 +27,6 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.github.legend295.fingerprintscanner.BuildConfig
 import com.github.legend295.fingerprintscanner.R
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.DocumentSnapshot
@@ -41,7 +40,6 @@ import com.google.firebase.storage.ktx.storage
 import com.google.gson.Gson
 import com.google.maps.android.SphericalUtil
 import com.newrelic.agent.android.NewRelic
-import com.newrelic.agent.android.logging.LogLevel
 import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -72,7 +70,6 @@ import com.scanner.utils.location.LocationWrapper
 import com.scanner.utils.readers.FingerprintHelper
 import com.scanner.utils.readersInitializationDialog
 import com.scanner.utils.templatesDownloadDialog
-import com.scanner.utils.transactionOutOfArea
 import com.scanner.utils.verificationDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -107,6 +104,8 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private var list: ArrayList<File> =
         ArrayList() // this will store the response of the saved files
+    private var templateList: ArrayList<File> =
+        ArrayList() // this will store the response of the saved Template files
     private val listOfTemplate = ArrayList<NBBiometricsTemplate>()
     private var fingerprintHelper: FingerprintHelper? = null
     private var readerStatus: ReaderStatus = ReaderStatus.NONE
@@ -137,6 +136,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private var alertDialog: AlertDialog? = null
     private var currentUser: User? = null
     private var skipLocation = false
+    private var skipFirebaseActions = false
 
     // if sleepModeTrack is equal to 3 then reinitialize the fingerprints
     // increment this when every sleep model trigger
@@ -160,20 +160,10 @@ internal class ScannerActivity : AppCompatActivity() {
         setContentView(R.layout.activity_scanner)
         listOfTemplate.clear()
         list = ArrayList()
+        templateList = ArrayList()
         identificationResult.clear()
         verificationDialog = null
-        // get all users whose FINGER_PRINT_SYNCED_ON_CLOUD is false from cache and upload files
 
-
-        getUserFromCache { it, isSuccess ->
-            val userDocuments = ArrayList<DocumentSnapshot>()
-            if (isSuccess) {
-                it?.let {
-                    userDocuments.addAll(it.documents)
-                    userDocuments.uploadFiles()
-                }
-            }
-        } //65112583554
 
         //Find views by id
         tvStatus = findViewById(R.id.tvStatus)
@@ -192,6 +182,20 @@ internal class ScannerActivity : AppCompatActivity() {
         val options = bundle?.getString(Constant.SCANNING_OPTIONS)
         scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
         skipLocation = scanningOptions?.skipLocation ?: false
+        skipFirebaseActions = scanningOptions?.skipFirebaseActions ?: false
+
+        if (!skipFirebaseActions) {
+            // get all users whose FINGER_PRINT_SYNCED_ON_CLOUD is false from cache and upload files
+            getUserFromCache { it, isSuccess ->
+                val userDocuments = ArrayList<DocumentSnapshot>()
+                if (isSuccess) {
+                    it?.let {
+                        userDocuments.addAll(it.documents)
+                        userDocuments.uploadFiles()
+                    }
+                }
+            } //65112583554
+        }
 
         setCustomTheme(scanningOptions?.themeOptions)
 
@@ -224,10 +228,12 @@ internal class ScannerActivity : AppCompatActivity() {
         fingerprintHelper?.setSessionHelper(sessionHelper = onSessionChanges)
         fingerprintHelper?.setFingerprintListener(fingerprintListener = fingerprintListener)
         fingerprintHelper?.setListOfTemplate(listOfTemplate = listOfTemplate)
-        fingerprintHelper?.setOnFileSaveListener(listener = onFileSavedListener(list))
+        fingerprintHelper?.setOnFileSaveListener(listener = onFileSavedListener(list, templateList))
 
 
         scanningOptions?.uniqueId?.let { fingerprintHelper?.setBvnNumber(it) }
+            ?: run { fingerprintHelper?.setBvnNumber("common") }
+        scanningOptions?.skipFirebaseActions?.let { fingerprintHelper?.setSkipFirebaseActions(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
         storagePath = scanningOptions?.storagePath ?: STORAGE_PATH
@@ -371,77 +377,79 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun init() {
-        scanningOptions?.uniqueId?.let { bvnNumber ->
-            val dialog = fetchingUserDB(scanningOptions?.themeOptions) {}
-            getUser(bvnNumber) { userFound, user ->
-                dialog.dismiss()
-                currentUser = user
-                if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
-                    val storageListRef =
-                        storageRef.child("$storagePath${bvnNumber}/").listAll()
-                    runBlocking {
-                        if (userFound && user?.fingerPrintSyncedOnCloud == true && storageListRef.await().items.size == 2) {
-                            handleMessageAndFinish("The user is already registered with entered Unique number. Please try with new BVN.")
-                        } else {
-//                            doesFileExistsInLocalStorage(this@ScannerActivity, bvnNumber){}
-                            saveUserToDB()
-                            initialize()
-                        }
-                    }
-                } else {
-                    if (userFound) {
-                        user?.let {
-                            if (skipLocation) {
-                                handleInitialization()
+        if (skipFirebaseActions) initialize()
+        else
+            scanningOptions?.uniqueId?.let { bvnNumber ->
+                val dialog = fetchingUserDB(scanningOptions?.themeOptions) {}
+                getUser(bvnNumber) { userFound, user ->
+                    dialog.dismiss()
+                    currentUser = user
+                    if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
+                        val storageListRef =
+                            storageRef.child("$storagePath${bvnNumber}/").listAll()
+                        runBlocking {
+                            if (userFound && user?.fingerPrintSyncedOnCloud == true && storageListRef.await().items.size == 2) {
+                                handleMessageAndFinish("The user is already registered with entered Unique number. Please try with new BVN.")
                             } else {
-                                // When there are no gps co-ordinates over firebase then show toast and finish
-                                if (user.gpsCoordinates.isNullOrEmpty() || user.gpsCoordinates?.get(
-                                        0
-                                    ) == null || user.gpsCoordinates?.get(
-                                        1
-                                    ) == null
-                                ) {
-//                                    handleMessageAndFinish("User's co-ordinates not found.")
-                                    handleInitialization()
-                                } else if (location == null && !skipLocation) {
-//                                    handleLocationEmpty()
-                                    handleInitialization()
-                                } else {
-                                    // Get user's co-ordinates and create LatLng to check distance
-                                    val latLng = LatLng(
-                                        user.gpsCoordinates?.get(0) ?: 0.0,
-                                        user.gpsCoordinates?.get(1) ?: 0.0
-                                    )
-
-                                    // Calculate distance
-                                    val distanceInMeter =
-                                        SphericalUtil.computeDistanceBetween(location, latLng)
-
-                                    // Check distance
-                                    /*  if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
-                                          transactionOutOfArea(scanningOptions?.themeOptions) {
-                                              finish()
-                                          }
-                                      } else {
-                                          handleInitialization()
-
-                                      }*/
-                                    // todo remove if want to enable area check for transaction
-                                    handleInitialization()
-                                }
+//                            doesFileExistsInLocalStorage(this@ScannerActivity, bvnNumber){}
+                                saveUserToDB()
+                                initialize()
                             }
                         }
                     } else {
-                        hideFingerprintDownloadDialog()
-                        handleMessageAndFinish("User not found.")
-                        logDebug("ScannerActivity:: --> User not found...")
-                    }
-                }
+                        if (userFound) {
+                            user?.let {
+                                if (skipLocation) {
+                                    handleInitialization()
+                                } else {
+                                    // When there are no gps co-ordinates over firebase then show toast and finish
+                                    if (user.gpsCoordinates.isNullOrEmpty() || user.gpsCoordinates?.get(
+                                            0
+                                        ) == null || user.gpsCoordinates?.get(
+                                            1
+                                        ) == null
+                                    ) {
+//                                    handleMessageAndFinish("User's co-ordinates not found.")
+                                        handleInitialization()
+                                    } else if (location == null && !skipLocation) {
+//                                    handleLocationEmpty()
+                                        handleInitialization()
+                                    } else {
+                                        // Get user's co-ordinates and create LatLng to check distance
+                                        val latLng = LatLng(
+                                            user.gpsCoordinates?.get(0) ?: 0.0,
+                                            user.gpsCoordinates?.get(1) ?: 0.0
+                                        )
 
+                                        // Calculate distance
+                                        val distanceInMeter =
+                                            SphericalUtil.computeDistanceBetween(location, latLng)
+
+                                        // Check distance
+                                        /*  if (distanceInMeter > Constant.TRANSACTION_DISTANCE) {
+                                              transactionOutOfArea(scanningOptions?.themeOptions) {
+                                                  finish()
+                                              }
+                                          } else {
+                                              handleInitialization()
+
+                                          }*/
+                                        // todo remove if want to enable area check for transaction
+                                        handleInitialization()
+                                    }
+                                }
+                            }
+                        } else {
+                            hideFingerprintDownloadDialog()
+                            handleMessageAndFinish("User not found.")
+                            logDebug("ScannerActivity:: --> User not found...")
+                        }
+                    }
+
+                }
+            } ?: run {
+                logDebug("ScannerActivity:: --> Unique Id is null...")
             }
-        } ?: run {
-            logDebug("ScannerActivity:: --> Unique Id is null...")
-        }
 
     }
 
@@ -611,6 +619,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 }
                 val intent = Intent()
                 intent.putExtra(ScannerConstants.DATA, list) // Add the read data to the intent.
+                intent.putExtra(
+                    ScannerConstants.TEMPLATE_DATA,
+                    templateList
+                ) // Add the read data to the intent.
                 setResult(RESULT_OK, intent) // Set the result of the scanning operation as OK.
                 finish() // Close the current activity.
             }
@@ -670,6 +682,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun clearLists() {
         list.clear() // Clear the data list.
+        templateList.clear()// Clear the template list.
         areBothFingerprintScannedSuccessfully.clear()
         fingerprintFiles.clear()
         localFileRefs.clear()
@@ -1114,59 +1127,64 @@ internal class ScannerActivity : AppCompatActivity() {
      * Proper error handling and UI thread handling (via runOnUiThread) are demonstrated for robustness.
      */
 
-    private fun onFileSavedListener(list: ArrayList<File>) = object : OnFileSavedListener {
-        override fun onSuccess(path: String, readerNo: Int) {
-            val file = File(path)
-            Log.d(ScannerActivity::class.simpleName, file.name)
-            /*if (list.size >= 2)
-                list.clear()*/
-            list.add(file)
-            Log.d(
-                ScannerActivity::class.simpleName,
-                "onFileSavedListener::onSuccess - List size -> ${list.size}"
-            )
-        }
-
-        override fun onBitmapSaveSuccess(path: String, readerNo: Int) {
-            val file = File(path)
-            Log.d(ScannerActivity::class.simpleName, file.name)
-            runOnUiThread {
-                if (readerNo == 0) {
-                    ivScannerLeft?.setImageURI(Uri.fromFile(file))
-                } else ivScannerRight?.setImageURI(Uri.fromFile(file))
-            }
-        }
-
-        override fun onFailure(e: Exception) {
-            e.printStackTrace()
-        }
-
-        override fun onTemplateSaveSuccess(path: String, readerNo: Int) {
-            println("onTemplateSaveSuccess ---------------- reader no $readerNo------- $path")
-            val file = File(path)
-            localFileRefs.add(path)
-            // cross check if files size is 2 or greater then 2
-            // if yes then clear list so that files will not get upload more than 2
-            if (fingerprintFiles.size >= 2) {
-                println("onTemplateSaveSuccess ---------------- reader no $readerNo------- clearing list")
-                fingerprintFiles.clear()
-            }
-            if (!fingerprintFiles.containsKey(readerNo)) {
-                fingerprintFiles[readerNo] = file
-                updateUserInDb(
-                    scanningOptions?.uniqueId!!,
-                    hashMapOf("fingerPrintLocalPath" to localFileRefs)
-                ) {}
-                println("uploadTemplates ---------------- File size ${fingerprintFiles.size}")
+    private fun onFileSavedListener(list: ArrayList<File>, templateList: ArrayList<File>) =
+        object : OnFileSavedListener {
+            override fun onSuccess(path: String, readerNo: Int) {
+                val file = File(path)
                 Log.d(ScannerActivity::class.simpleName, file.name)
-                uploadFileFromLocalToFirebaseStorage(
-                    scanningOptions?.uniqueId!!,
-                    Uri.fromFile(file)
-                ) {}
-                println("onTemplateSaveSuccess ---------------- reader no $readerNo ------- File size ${fingerprintFiles.size}")
+                /*if (list.size >= 2)
+                    list.clear()*/
+                list.add(file)
+                Log.d(
+                    ScannerActivity::class.simpleName,
+                    "onFileSavedListener::onSuccess - List size -> ${list.size}"
+                )
+            }
+
+            override fun onBitmapSaveSuccess(path: String, readerNo: Int) {
+                val file = File(path)
+                Log.d(ScannerActivity::class.simpleName, file.name)
+                runOnUiThread {
+                    if (readerNo == 0) {
+                        ivScannerLeft?.setImageURI(Uri.fromFile(file))
+                    } else ivScannerRight?.setImageURI(Uri.fromFile(file))
+                }
+            }
+
+            override fun onFailure(e: Exception) {
+                e.printStackTrace()
+            }
+
+            override fun onTemplateSaveSuccess(path: String, readerNo: Int) {
+                println("onTemplateSaveSuccess ---------------- reader no $readerNo------- $path")
+                val file = File(path)
+                templateList.add(file)
+                if (skipFirebaseActions) return
+
+                localFileRefs.add(path)
+                // cross check if files size is 2 or greater then 2
+                // if yes then clear list so that files will not get upload more than 2
+                if (fingerprintFiles.size >= 2) {
+                    println("onTemplateSaveSuccess ---------------- reader no $readerNo------- clearing list")
+                    fingerprintFiles.clear()
+                }
+                if (!fingerprintFiles.containsKey(readerNo)) {
+                    fingerprintFiles[readerNo] = file
+                    updateUserInDb(
+                        scanningOptions?.uniqueId!!,
+                        hashMapOf("fingerPrintLocalPath" to localFileRefs)
+                    ) {}
+                    println("uploadTemplates ---------------- File size ${fingerprintFiles.size}")
+                    Log.d(ScannerActivity::class.simpleName, file.name)
+                    uploadFileFromLocalToFirebaseStorage(
+                        scanningOptions?.uniqueId!!,
+                        Uri.fromFile(file)
+                    ) {}
+                    println("onTemplateSaveSuccess ---------------- reader no $readerNo ------- File size ${fingerprintFiles.size}")
+                }
+
             }
         }
-    }
 
     private val fingerprintListener = object : FingerprintListener {
         override fun showResult(
@@ -1759,7 +1777,8 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun downloadFilesFromFirebaseStorage(callback: (Boolean) -> Unit) {
         val storageList = ArrayList<StorageReference>()
-        val storageListRef = storageRef.child("$storagePath${scanningOptions?.uniqueId!!}/").listAll()
+        val storageListRef =
+            storageRef.child("$storagePath${scanningOptions?.uniqueId!!}/").listAll()
         storageListRef.addOnSuccessListener {
             if (it.items.isNotEmpty()) {
                 it.items.forEach { reference ->
@@ -2045,6 +2064,7 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private fun saveTransactionToDb() {
+        if (skipFirebaseActions) return
         val data = mutableMapOf<String, Any>()
         scanningOptions?.customObject?.let {
             for (key in it.keys()) {

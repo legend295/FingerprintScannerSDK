@@ -90,6 +90,11 @@ class FingerprintScanner {
             return this
         }
 
+        fun skipFirebaseActions(skipFirebaseActions: Boolean): Builder {
+            options.skipFirebaseActions = skipFirebaseActions
+            return this
+        }
+
 
         fun start(
             activity: Activity,
@@ -110,6 +115,7 @@ class FingerprintScanner {
 
         private fun validate() {
             if (options.scanningType == null) throw NullPointerException("Scanning Type cannot be null")
+            if (options.skipFirebaseActions) return
             if (options.uniqueId == null) throw NullPointerException("Bvn number cannot be null")
             require(options.uniqueId!!.isNotEmpty()) { "Bvn number cannot be empty" }
             if (options.scanningType == ScanningType.REGISTRATION) {

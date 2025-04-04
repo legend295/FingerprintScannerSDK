@@ -11,15 +11,9 @@ import androidx.core.widget.ContentLoadingProgressBar
 import com.fingerprintscanner.utility.showFieldsDialog
 import com.github.legend295.fingerprintscanner.BuildConfig
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.firebase.firestore.DocumentSnapshot
-import com.newrelic.agent.android.NewRelic
-import com.newrelic.agent.android.logging.LogLevel
 import com.scanner.activity.FingerprintScanner
 import com.scanner.utils.builder.ThemeOptions
-import com.scanner.utils.constants.Keys
-import com.scanner.utils.constants.Keys.FINGER_PRINT_SYNCED_ON_CLOUD
 import com.scanner.utils.constants.ScannerConstants
-import com.scanner.utils.constants.Source
 import com.scanner.utils.enums.ScanningType
 import org.json.JSONObject
 import java.io.File
@@ -52,6 +46,8 @@ class MainActivity : AppCompatActivity() {
 
 
         tvRegistration.setOnClickListener {
+            startScanning()
+            return@setOnClickListener
             sheet =
                 showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
                     sheet?.dismiss()
@@ -157,6 +153,22 @@ class MainActivity : AppCompatActivity() {
 
     }
 
+    private fun startScanning() {
+        FingerprintScanner.Builder(this)
+            .setScanningType(ScanningType.REGISTRATION)
+            .skipFirebaseActions(true)
+            .storagePath("biometrics/")
+            .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
+            .setThemeOptions(themeOptions)
+            .setCustomData(JSONObject().apply {
+                put("pin", 1234)
+            })
+            .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
+            .skipLocation(skipLocation = false)
+            .start(this, scanningLauncher)
+
+    }
+
     override fun onPause() {
         super.onPause()
         try {
@@ -170,28 +182,47 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             if (it.resultCode == RESULT_OK) {
                 val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
+                val templateList: ArrayList<File>? =
+                    it.data?.serializable(ScannerConstants.TEMPLATE_DATA)
 //                val customObject: JSONObject =
 //                    (it.data?.getStringExtra(ScannerConstants.CUSTOM_DATA).toString()) as JSONObject
 //                Log.d(MainActivity::class.simpleName, customObject.toString())
                 val isVerified: Boolean? =
                     it.data?.getBooleanExtra(ScannerConstants.VERIFICATION_RESULT, false)
                 Log.d(MainActivity::class.simpleName, list?.size.toString())
-                handleResponse(list, isVerified)
+                handleResponse(list, isVerified, templateList)
             }
         }
 
-    private fun handleResponse(list: ArrayList<File>?, isVerified: Boolean?) {
+    private fun handleResponse(
+        list: ArrayList<File>?,
+        isVerified: Boolean?,
+        templateList: ArrayList<File>?
+    ) {
         if (list.isNullOrEmpty()) {
             tvStatus?.text =
                 StringBuilder().append("Fingerprint verification :- ").append(isVerified)
             return
         }
+        println(list.size)
         var message = ""
         list.forEach {
             message += "\n${it.path}"
         }
         if (message.isNotEmpty()) {
             tvStatus?.text = StringBuilder().append("File saved to paths :- ").append(message)
+        }
+        var templateMessage = ""
+        println(templateList?.size)
+        Toast.makeText(this, "Template size - ${templateList?.size}", Toast.LENGTH_SHORT).show()
+        templateList?.forEach {
+            templateMessage += "\n${it.path}"
+        }
+        if (templateMessage.isNotEmpty()) {
+            tvStatus?.text =
+                StringBuilder().append("File saved to paths :- ").append(message)
+                    .append("\nTemplate Saved at paths:-\n")
+                    .append(templateMessage)
         }
     }
 }
