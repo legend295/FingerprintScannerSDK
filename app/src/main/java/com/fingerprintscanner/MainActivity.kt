@@ -46,8 +46,8 @@ class MainActivity : AppCompatActivity() {
 
 
         tvRegistration.setOnClickListener {
-            startScanning()
-            return@setOnClickListener
+//            startScanning()
+//            return@setOnClickListener
             sheet =
                 showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
                     sheet?.dismiss()
@@ -135,8 +135,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRegistration(bvnNumber: String, phoneNumber: String) {
-
-
         FingerprintScanner.Builder(this)
             .setUniqueId(bvnNumber)
             .setPhoneNumber(phoneNumber)

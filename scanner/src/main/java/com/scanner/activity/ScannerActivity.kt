@@ -201,9 +201,12 @@ internal class ScannerActivity : AppCompatActivity() {
 
         // Initialize New Relic
         scanningOptions?.newRelicToken?.let {
-            NewRelic.withApplicationToken(
-                it
-            ).withLoggingEnabled(true).withCrashReportingEnabled(true).start(this)
+            try {
+                NewRelic.withApplicationToken(
+                    it
+                ).withLoggingEnabled(true).withCrashReportingEnabled(true).start(this)
+            } catch (_: Exception) {
+            }
         }
 
 
@@ -538,7 +541,10 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private fun showFingerprintInitializationDialog() {
         runOnUiThread {
-            getDialog()?.show()
+            try {
+                getDialog()?.show()
+            } catch (ignore: Exception) {
+            }
         }
     }
 
@@ -1357,6 +1363,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     } else {
                         readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
                         setStartButtonMessage("Done", true)
+                        isFingerprintScanningInProgress = false
                         handleCancelButtonsVisibility(isVisible = false)
                         setMessage(getString(R.string.read_success))
                     }

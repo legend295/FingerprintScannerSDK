@@ -142,7 +142,7 @@ internal class FingerprintReader(
 
     fun setBvnNumber(bvnNumber: String) {
         this.bvnNumber = bvnNumber
-        dirPath = "$dirPath/$bvnNumber/"
+        dirPath = "${context.filesDir.path}/$bvnNumber/"
     }
 
     fun setSkipFirebaseActions(skipFirebaseActions: Boolean) {
@@ -676,7 +676,8 @@ internal class FingerprintReader(
                 0
             )
 //            identifyFingers()
-            if (!saveImage(wsqTemplate, "wsq", path)) {
+            val date = System.currentTimeMillis()
+            if (!saveImage(wsqTemplate, "wsq", path, date)) {
                 Log.e(
                     "WaxdPosLib",
                     "FingerprintReader[$readerNo]::Scan -> SaveImage WSQ FAILED"
@@ -684,7 +685,7 @@ internal class FingerprintReader(
                 logError("FingerprintReader[$readerNo]::Scan -> SaveImage WSQ FAILED")
                 return false
             }
-            if (!saveBitmap(image, path)) {
+            if (!saveBitmap(image, path, date)) {
                 Log.e(
                     "WaxdPosLib",
                     "FingerprintReader[$readerNo]::Scan -> SaveBitmap FAILED"
@@ -722,7 +723,7 @@ internal class FingerprintReader(
         return format.format(date)
     }
 
-    private fun saveBitmap(image: ByteArray, path: String): Boolean {
+    private fun saveBitmap(image: ByteArray, path: String, date: Long): Boolean {
         return try {
             val filePath = "$path$readerNo.jpg"
             Log.d(
@@ -764,11 +765,11 @@ internal class FingerprintReader(
         )
     }
 
-    private fun saveImage(imageData: ByteArray?, ext: String, path: String): Boolean {
+    private fun saveImage(imageData: ByteArray?, ext: String, path: String, date: Long): Boolean {
         Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::SaveImage...")
         logDebug("FingerprintReader[$readerNo]::SaveImage...")
         return try {
-            val filePath = "$path$readerNo.$ext"
+            val filePath = "$path$readerNo$date.$ext"
             val files = File(path)
             files.mkdirs()
             val fos = FileOutputStream(filePath)
@@ -1132,8 +1133,8 @@ internal class FingerprintReader(
                         500,
                         NBDeviceImageQualityAlgorithm.NFIQ
                     )
-
-                    if (!saveImage(template.data, "wsq", path)) {
+                    val date = System.currentTimeMillis()
+                    if (!saveImage(template.data, "wsq", path, date)) {
                         Log.e(
                             "WaxdPosLib",
                             "FingerprintReader[$readerNo]::Scan -> SaveImage WSQ FAILED"
@@ -1143,9 +1144,10 @@ internal class FingerprintReader(
                         return false
                     }
 
+
                     previewListener.lastImage?.let {
                         val bitmap = convertToBitmaps(scanFormatInfo, it)
-                        if (!saveOnlyBitmap(bitmap, path)) {
+                        if (!saveOnlyBitmap(bitmap, path, date)) {
                             Log.e(
                                 "WaxdPosLib",
                                 "FingerprintReader[$readerNo]::Scan -> SaveBitmap FAILED"
@@ -1158,7 +1160,7 @@ internal class FingerprintReader(
 
 
                     showResultOnUiThread(
-                        previewListener.lastImage, String.format(
+                        previewListener.lastImage, String.format(Locale.getDefault(),
                             "Last scan = %d msec, Image process = %d msec, Extract = %d msec, Total time = %d msec\nTemplate quality = %d, Last finger detect score = %d",
                             previewListener.timeScanEnd - previewListener.timeScanStart,
                             previewListener.timeOK - previewListener.timeScanEnd,
@@ -1221,7 +1223,7 @@ internal class FingerprintReader(
                     val file = File(dirPath)
                     Log.d(
                         "WaxdPosLib",
-                        "FingerprintReader[$readerNo]::identifyFingers -> Adding templates to list"
+                        "FingerprintReader[$readerNo]::identifyFingers -> Adding templates to list from path - $dirPath"
                     )
                     logDebug("FingerprintReader[$readerNo]::identifyFingers -> Adding templates to list")
                     val fileLists = file.listFiles()
@@ -1446,9 +1448,10 @@ internal class FingerprintReader(
         )
     }
 
-    private fun saveOnlyBitmap(bitmap: Bitmap, path: String): Boolean {
+    private fun saveOnlyBitmap(bitmap: Bitmap, path: String, date: Long): Boolean {
         return try {
-            val filePath = "$path$readerNo.jpg"
+            val filePath = "$path$readerNo$date.jpg"
+
             Log.d(
                 "WaxdPosLib",
                 "FingerprintReader[$readerNo]::SaveBitmap -> Saving Bitmap to $filePath"

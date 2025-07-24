@@ -7,11 +7,19 @@ import org.json.JSONObject
 object NewRelicWrapper {
 
     fun logError(message: String) {
-        NewRelic.log(LogLevel.ERROR, message)
+        try {
+
+            NewRelic.log(LogLevel.ERROR, message)
+        } catch (_: Exception) {
+        }
     }
 
     fun logDebug(message: String) {
-        NewRelic.log(LogLevel.WARN, message)
+        try {
+
+            NewRelic.log(LogLevel.WARN, message)
+        } catch (_: Exception) {
+        }
     }
 
     fun logInfo(message: String) {
@@ -19,11 +27,15 @@ object NewRelicWrapper {
     }
 
     fun logCustom(message: JSONObject) {
-        val map = mutableMapOf<String, Any>()
-        for (key in message.keys()) {
-            map[key] = message.get(key)
+        try {
+
+            val map = mutableMapOf<String, Any>()
+            for (key in message.keys()) {
+                map[key] = message.get(key)
+            }
+            NewRelic.recordCustomEvent("CustomEvent", map)
+        } catch (_: Exception) {
         }
-        NewRelic.recordCustomEvent("CustomEvent", map)
     }
 
 }
