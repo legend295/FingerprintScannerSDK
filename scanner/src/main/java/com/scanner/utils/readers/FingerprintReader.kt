@@ -39,6 +39,7 @@ import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
 import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
+import com.telpo.tps550.api.fingerprint.FingerPrint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -766,7 +767,7 @@ internal class FingerprintReader(
     }
 
     private fun saveImage(imageData: ByteArray?, ext: String, path: String, date: Long): Boolean {
-        Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::SaveImage...")
+        Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::SaveImage in format $ext ...")
         logDebug("FingerprintReader[$readerNo]::SaveImage...")
         return try {
             val filePath = "$path$readerNo$date.$ext"
@@ -1110,18 +1111,14 @@ internal class FingerprintReader(
                         previewListener
                     )
                     timeStop = System.currentTimeMillis()
-//                    } catch (ex: Exception) {
-//                        ex.printStackTrace()
-//                    }
+
                     fingerprintListener.extractionResult(extractResult?.status, readerNo)
                     if (extractResult?.status != NBBiometricsStatus.OK) {
                         return false
-//                    throw Exception("Extraction failed, reason: " + extractResult?.status)
                     }
 
                     if (isSpoofEnabled && isValidSpoofScore && previewListener.getSpoofScore() <= tmpSpoofThreshold) {
                         return false
-//                    throw Exception("Extraction failed, reason: $spoofCause")
                     }
                     showMessage("Extracted successfully!")
                     val template = extractResult.template
@@ -1134,7 +1131,19 @@ internal class FingerprintReader(
                         NBDeviceImageQualityAlgorithm.NFIQ
                     )
                     val date = System.currentTimeMillis()
-                    if (!saveImage(template.data, "wsq", path, date)) {
+
+                    val wsqImage = reader?.ConvertImage(
+                        template.data,
+                        scanFormatInfo!!.width,
+                        scanFormatInfo!!.height,
+                        500,
+                        NBDeviceEncodeFormat.WSQ,
+                        1.0f,
+                        NBDeviceFingerPosition.Unknown,
+                        0
+                    )
+
+                    if (!saveImage(wsqImage, "wsq", path, date)) {
                         Log.e(
                             "WaxdPosLib",
                             "FingerprintReader[$readerNo]::Scan -> SaveImage WSQ FAILED"
@@ -1160,7 +1169,8 @@ internal class FingerprintReader(
 
 
                     showResultOnUiThread(
-                        previewListener.lastImage, String.format(Locale.getDefault(),
+                        previewListener.lastImage, String.format(
+                            Locale.getDefault(),
                             "Last scan = %d msec, Image process = %d msec, Extract = %d msec, Total time = %d msec\nTemplate quality = %d, Last finger detect score = %d",
                             previewListener.timeScanEnd - previewListener.timeScanStart,
                             previewListener.timeOK - previewListener.timeScanEnd,
@@ -1337,6 +1347,7 @@ internal class FingerprintReader(
         // Save template
         try {
             val files = File(dirPath)
+            Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::saveTemplate saving in format .dat at path - $dirPath")
             if (skipFirebaseActions) {
                 val binaryTemplate = context.saveTemplate(this)
                 showMessage(
@@ -1353,12 +1364,12 @@ internal class FingerprintReader(
 //                val dirPath = this.context.filesDir.path + "/NBCapturedImages/"
                 files.mkdirs()
 
-                val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.bin"
+                val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.dat"
                 showMessage("Saving ISO template to $filePath")
                 val fos = FileOutputStream(filePath)
                 fos.write(binaryTemplate)
                 fos.close()
-
+                Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::saveTemplate saved in format .dat at path - $filePath")
                 listener.onTemplateSaveSuccess(filePath, readerNo)
             } else {
                 if (files.isDirectory &&
@@ -1385,12 +1396,12 @@ internal class FingerprintReader(
 //                val dirPath = this.context.filesDir.path + "/NBCapturedImages/"
                         files.mkdirs()
 
-                        val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.bin"
+                        val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.dat"
                         showMessage("Saving ISO template to $filePath")
                         val fos = FileOutputStream(filePath)
                         fos.write(it)
                         fos.close()
-
+                        Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::saveTemplate saved in format .dat at path - $filePath")
 
                         listener.onTemplateSaveSuccess(filePath, readerNo)
                     }
