@@ -37,12 +37,14 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         val tvRegistration: Button = findViewById(R.id.btnRegistration)
         val tvVerification: Button = findViewById(R.id.btnVerification)
+        val tvVersion: AppCompatTextView = findViewById(R.id.tvVersion)
         progressBar = findViewById(R.id.progressBar)
         progressBar?.hide()
 
         tvStatus = findViewById(R.id.tvStatus)
 
 
+        tvVersion.text = StringBuilder().append("v").append(com.fingerprintscanner.BuildConfig.VERSION_NAME)
 
 
         tvRegistration.setOnClickListener {
@@ -146,9 +148,8 @@ class MainActivity : AppCompatActivity() {
                 put("pin", 1234)
             })
             .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
-            .skipLocation(skipLocation = false)
+            .skipLocation(skipLocation = true)
             .start(this, scanningLauncher)
-
     }
 
     private fun startScanning() {

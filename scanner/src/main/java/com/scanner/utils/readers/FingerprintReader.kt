@@ -30,8 +30,10 @@ import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.devices.NBDeviceStopMode
 import com.nextbiometrics.system.NextBiometricsException
+import com.scanner.app.ScannerApp
 import com.scanner.utils.KeyStore.decryptData
 import com.scanner.utils.KeyStore.encryptData
+import com.scanner.utils.KeyStorePortable
 import com.scanner.utils.NewRelicWrapper.logCustom
 import com.scanner.utils.NewRelicWrapper.logDebug
 import com.scanner.utils.NewRelicWrapper.logError
@@ -393,6 +395,8 @@ internal class FingerprintReader(
         logDebug("FingerPrintReader[$readerNo]::CancelTap ...")
         return try {
             run = false
+            isScanAndExtractInProgress = false
+            reader?.cancelScan()          // ← ADD THIS LINE
             true
         } catch (e: java.lang.Exception) {
             NewRelic.recordHandledException(e)
@@ -409,6 +413,7 @@ internal class FingerprintReader(
         logDebug("FingerPrintReader[$readerNo]::Close...")
         try {
             run = false
+            isScanAndExtractInProgress = false
             Thread.sleep(10)
             if (reader != null) {
                 reader?.dispose()
@@ -421,8 +426,8 @@ internal class FingerprintReader(
     }
 
     fun enableLowPowerMode() {
+        val context = NBBiometricsContext(reader)
         try {
-            val context = NBBiometricsContext(reader)
             try {
                 context.cancelOperation()
                 reader?.lowPowerMode()
@@ -443,6 +448,8 @@ internal class FingerprintReader(
                 "FingerPrintReader[" + readerNo + "]::enableLowPowerMode NEXT Biometrics SDK error EXCEPTION--> " + ex.localizedMessage + "Exception code --> " + ex.code
             )
         } catch (ex: Throwable) {
+            cancelTap()
+            context.cancelOperation()
             NewRelic.recordHandledException(ex)
             Log.e(
                 "WaxdPosLib",
@@ -827,28 +834,30 @@ internal class FingerprintReader(
                     templateType.toString()
                 )
             )
-            this.context.decryptData(fileName, bvnNumber, readerNo) {
+            val decryptedData = KeyStorePortable.decryptData(fileName, bvnNumber, ScannerApp.getInstance().key?:"")
+            Log.d(
+                "WaxdPosLib",
+                "FingerprintReader[$readerNo]::loadTemplate -> ${decryptedData?.size ?: 0}"
+            )
+            logDebug("FingerprintReader[$readerNo]::loadTemplate -> ${decryptedData?.size ?: 0}")
+            decryptedData?.let { array ->
+                Log.d(FingerprintReader::class.simpleName, "byte array size - ${array.size}")
+                logDebug("FingerprintReader[$readerNo]::loadTemplate -> byte array size - ${array.size}")
+//            val template = context.loadTemplate(templateType, readAllBytes(fileName))
+                val template = context.loadTemplate(templateType, array)
+                println("Template loaded successfully.")
+                callback(template)
+            } ?: run {
                 Log.d(
                     "WaxdPosLib",
-                    "FingerprintReader[$readerNo]::loadTemplate -> ${it?.size ?: 0}"
+                    "FingerprintReader[$readerNo]::loadTemplate -> array size is empty}"
                 )
-                logDebug("FingerprintReader[$readerNo]::loadTemplate -> ${it?.size ?: 0}")
-                it?.let { array ->
-                    Log.d(FingerprintReader::class.simpleName, "byte array size - ${array.size}")
-                    logDebug("FingerprintReader[$readerNo]::loadTemplate -> byte array size - ${array.size}")
-//            val template = context.loadTemplate(templateType, readAllBytes(fileName))
-                    val template = context.loadTemplate(templateType, array)
-                    println("Template loaded successfully.")
-                    callback(template)
-                } ?: run {
-                    Log.d(
-                        "WaxdPosLib",
-                        "FingerprintReader[$readerNo]::loadTemplate -> array size is empty}"
-                    )
-                    logDebug("FingerprintReader[$readerNo]::loadTemplate -> array size is empty}")
-                    callback(null)
-                }
+                logDebug("FingerprintReader[$readerNo]::loadTemplate -> array size is empty}")
+                callback(null)
             }
+           /* this.context.decryptData(fileName, bvnNumber, readerNo) {decryptedData->
+
+            }*/
         } catch (e: Exception) {
             NewRelic.recordHandledException(e)
             e.printStackTrace()
@@ -1051,10 +1060,16 @@ internal class FingerprintReader(
     }
 
     fun scanAndExtract(path: String): Boolean {
+        /* if (isScanAndExtractInProgress) {
+             Log.w(
+                 "WaxdPosLib",
+                 "FingerprintReader[$readerNo]::scanAndExtract -> already in progress, ignoring duplicate call"
+             )
+             return false
+         }*/
         return try {
             Thread {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-                //Hide Menu before scan and extract starts
                 scanExtract(path)
             }.start()
             true
@@ -1100,7 +1115,6 @@ internal class FingerprintReader(
 //                    try {
                     timeStart = System.currentTimeMillis()
                     //Hide Menu before scan and extract starts.
-                    isScanAndExtractInProgress = true
 //                    if (isSpoofEnabled) enableSpoof()
                     //Enable Image preview for FAP20
                     //device.setParameter(410,1);
@@ -1230,23 +1244,30 @@ internal class FingerprintReader(
                     // Identification
                     //
                     showMessage("")
-                    val file = File(dirPath)
+                    val dir = File(dirPath)
                     Log.d(
                         "WaxdPosLib",
                         "FingerprintReader[$readerNo]::identifyFingers -> Adding templates to list from path - $dirPath"
                     )
                     logDebug("FingerprintReader[$readerNo]::identifyFingers -> Adding templates to list")
-                    val fileLists = file.listFiles()
+                    // FIX 1 — only pick files that belong to THIS reader.
+                    // Saved filename pattern: "<timestamp><readerNo>-ISO-Template.dat"
+                    val readerFiles = dir.listFiles()/* { file ->
+                        file.name.contains("${readerNo}-ISO-Template")
+                    }*/
                     Log.d(
                         "WaxdPosLib",
-                        "FingerprintReader[$readerNo]::identifyFingers -> Files found in directory - ${fileLists?.size}"
+                        "FingerprintReader[$readerNo]::identifyFingers -> Files found in directory - ${readerFiles?.size}"
                     )
-                    logDebug("FingerprintReader[$readerNo]::identifyFingers -> Files found in directory - ${fileLists?.size}")
-                    fileLists?.forEach {
+                    logDebug("FingerprintReader[$readerNo]::identifyFingers -> Files found in directory - ${readerFiles?.size}")
+                    // clear stale templates from previous sessions before loading.
+                    listOfTemplate.clear()
+
+                    readerFiles?.forEach {
                         loadTemplate(it.path) { template ->
                             template?.let { it1 -> listOfTemplate.add(it1) }
                         }
-                        Thread.sleep(300)
+                        // Thread.sleep(300) removed — loadTemplate callback is synchronous.
                     }
                     if (listOfTemplate.isEmpty()) {
                         Log.d(
@@ -1254,28 +1275,26 @@ internal class FingerprintReader(
                             "FingerprintReader[$readerNo]::identifyFingers -> result = listOfTemplate is empty"
                         )
                         logDebug("FingerprintReader[$readerNo]::identifyFingers -> result = listOfTemplate is empty")
+                        showMessage("Valid fingerprints not found.", isErrorMessage = true)
+                        fingerprintListener.identificationResult(result = null, readerNo)
                         return false
                     }
-                    val templates: ArrayList<AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>> =
-                        ArrayList()
+                    val templates = ArrayList<AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>>(listOfTemplate.size)
                     Log.d(
                         "WaxdPosLib",
                         "FingerprintReader[$readerNo]::identifyFingers -> result = size of templates - ${listOfTemplate.size}"
                     )
                     logDebug("FingerprintReader[$readerNo]::identifyFingers -> result = size of templates - ${listOfTemplate.size}")
-                    for (i in 0 until listOfTemplate.size/* - 2*/) {
+
+                    listOfTemplate.forEachIndexed { i, tmpl ->
                         Log.d(
                             "WaxdPosLib",
                             "FingerprintReader[$readerNo]::Scan -> result - adding template to list"
                         )
-                        logDebug("FingerprintReader[$readerNo]::Scan -> result - adding template to list")
-                        templates.add(
-                            AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>(
-                                "Template$i",
-                                listOfTemplate[i]
-                            )
-                        )
+                        logDebug("FingerprintReader[$readerNo]::Scan -> adding template[$i] to list")
+                        templates.add(AbstractMap.SimpleEntry("Template$i", tmpl))
                     }
+
                     // add more templates
                     showMessage("Identifying fingerprint, please put your finger on sensor!")
                     previewListener.reset()
@@ -1310,6 +1329,7 @@ internal class FingerprintReader(
                     showMessage("Identified successfully with fingerprint: " + identifyResult.templateId)
                     showResultOnUiThread(
                         previewListener.lastImage, String.format(
+                            Locale.getDefault(),
                             "Last scan = %d msec, Image process = %d msec, Extract+Identify = %d msec, Total time = %d msec\nMatch score = %d, Last finger detect score = %d",
                             previewListener.timeScanEnd - previewListener.timeScanStart,
                             previewListener.timeOK - previewListener.timeScanEnd,
@@ -1339,6 +1359,7 @@ internal class FingerprintReader(
             context.dispose()
             context = null
         }
+        isScanAndExtractInProgress = false
         fingerprintListener.onScanExtractCompleted(readerNo)
         return success
     }
@@ -1369,7 +1390,10 @@ internal class FingerprintReader(
                 val fos = FileOutputStream(filePath)
                 fos.write(binaryTemplate)
                 fos.close()
-                Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::saveTemplate saved in format .dat at path - $filePath")
+                Log.d(
+                    "WaxdPosLib",
+                    "FingerprintReader[$readerNo]::saveTemplate saved in format .dat at path - $filePath"
+                )
                 listener.onTemplateSaveSuccess(filePath, readerNo)
             } else {
                 if (files.isDirectory &&
@@ -1377,34 +1401,40 @@ internal class FingerprintReader(
                     !files.exists()
                 ) {
                     val binaryTemplate = context.saveTemplate(this)
-                    this@FingerprintReader.context.encryptData(
+                    val encryptedData =
+                        KeyStorePortable.encryptData(binaryTemplate, bvnNumber, ScannerApp.getInstance().key ?: "")
+                    showMessage(
+                        String.format(
+                            Locale.getDefault(),
+                            "Extracted template length: %d bytes",
+                            encryptedData.size
+                        )
+                    )
+                    val base64Template = Base64.encodeToString(binaryTemplate, 0)
+                    showMessage("Extracted template: $base64Template")
+
+                    // Store template to file
+//                val dirPath = this.context.filesDir.path + "/NBCapturedImages/"
+                    files.mkdirs()
+
+                    val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.dat"
+                    showMessage("Saving ISO template to $filePath")
+                    val fos = FileOutputStream(filePath)
+                    fos.write(encryptedData)
+                    fos.close()
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerprintReader[$readerNo]::saveTemplate saved in format .dat at path - $filePath"
+                    )
+
+                    listener.onTemplateSaveSuccess(filePath, readerNo)
+                   /* this@FingerprintReader.context.encryptData(
                         binaryTemplate,
                         bvnNumber,
                         readerNo
-                    ) {
-                        showMessage(
-                            String.format(
-                                Locale.getDefault(),
-                                "Extracted template length: %d bytes",
-                                it.size
-                            )
-                        )
-                        val base64Template = Base64.encodeToString(binaryTemplate, 0)
-                        showMessage("Extracted template: $base64Template")
+                    ) {encryptedData->
 
-                        // Store template to file
-//                val dirPath = this.context.filesDir.path + "/NBCapturedImages/"
-                        files.mkdirs()
-
-                        val filePath = dirPath + createFileName() + readerNo + "-ISO-Template.dat"
-                        showMessage("Saving ISO template to $filePath")
-                        val fos = FileOutputStream(filePath)
-                        fos.write(it)
-                        fos.close()
-                        Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::saveTemplate saved in format .dat at path - $filePath")
-
-                        listener.onTemplateSaveSuccess(filePath, readerNo)
-                    }
+                    }*/
                 }
             }
         } catch (e: Exception) {

@@ -61,7 +61,7 @@ internal object KeyStore {
     }
 
     private fun getKey(bvnNumber: String, readerNo: Int) =
-        bvnNumber + ScannerApp.getInstance().key + readerNo
+        bvnNumber + ScannerApp.getInstance().key + 0
 
     private fun generateIv(): ByteArray {
         val iv = ByteArray(12)
@@ -93,6 +93,7 @@ internal object KeyStore {
     ) {
         try {
             val byteArray = readAllBytes(filePath)
+//            val finalReaderNo = extractReaderNumber(filePath)?.toInt() ?: readerNo
             val key = getKey(bvnNumber, readerNo)
             val encryptedData = getEncryptedData(Pair(key, "$key.iv"))
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -113,7 +114,7 @@ internal object KeyStore {
             } catch (e: AEADBadTagException) {
                 Log.d(
                     "WaxdPosLib",
-                    "FingerprintReader[$readerNo]::decryptData AEADBadTagException-> ${e.message}"
+                    "FingerprintReader[$readerNo]::decryptData AEADBadTagException-> ${e.message ?: e.localizedMessage}"
                 )
                 callback(null)
             }
@@ -123,6 +124,28 @@ internal object KeyStore {
                 "FingerprintReader[$readerNo]::decryptData Exception-> ${e.message}"
             )
             callback(null)
+        }
+    }
+
+    fun extractReaderNumber(filePath: String): String? {
+        val suffix = "-ISO-Template.dat"
+        // 1. Isolate just the file name from the full path
+        val fileName = filePath.substringAfterLast("/")
+
+        // Safety check
+        if (!fileName.endsWith(suffix)) return null
+
+        // 2. Strip off the suffix -> "2026-02-18-15-34-481"
+        val dateAndReaderNo = fileName.removeSuffix(suffix)
+
+        // 3. "yyyy-MM-dd-HH-mm-ss" is always exactly 19 characters long
+        val dateLength = 19
+
+        // 4. Everything after the 19th character is your reader number!
+        return if (dateAndReaderNo.length > dateLength) {
+            dateAndReaderNo.substring(dateLength)
+        } else {
+            null // Failsafe in case the file name was malformed
         }
     }
 

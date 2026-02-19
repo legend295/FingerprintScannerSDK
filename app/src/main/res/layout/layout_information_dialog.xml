@@ -14,12 +14,12 @@
         android:background="@drawable/bg_edit_text"
         android:hint="BVN Number*"
         android:imeOptions="actionNext"
-        android:inputType="text"
-        android:textColor="@color/black"
-        android:textColorHint="@color/gray"
+        android:inputType="phone"
         android:maxLength="11"
         android:maxLines="1"
         android:padding="10dp"
+        android:textColor="@color/black"
+        android:textColorHint="@color/gray"
         app:layout_constraintTop_toTopOf="parent" />
 
     <androidx.appcompat.widget.AppCompatEditText
@@ -28,13 +28,13 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:background="@drawable/bg_edit_text"
-        android:textColor="@color/black"
-        android:hint="Phone Number*"
-        android:imeOptions="actionNext"
+        android:hint="Phone Number"
+        android:imeOptions="actionDone"
         android:inputType="phone"
         android:maxLength="13"
-        android:textColorHint="@color/gray"
         android:padding="10dp"
+        android:textColor="@color/black"
+        android:textColorHint="@color/gray"
         app:layout_constraintTop_toBottomOf="@id/etBvnNumber" />
 
     <androidx.appcompat.widget.AppCompatEditText
@@ -46,10 +46,10 @@
         android:hint="Name"
         android:imeOptions="actionDone"
         android:inputType="textPersonName"
-        android:textColor="@color/black"
         android:maxLength="30"
-        android:textColorHint="@color/gray"
         android:padding="10dp"
+        android:textColor="@color/black"
+        android:textColorHint="@color/gray"
         app:layout_constraintTop_toBottomOf="@id/etPhoneNumber" />
 
     <androidx.appcompat.widget.AppCompatEditText
@@ -61,10 +61,10 @@
         android:hint="Enter amount*"
         android:imeOptions="actionNext"
         android:inputType="phone"
-        android:textColorHint="@color/gray"
         android:maxLength="10"
         android:padding="10dp"
         android:textColor="@color/black"
+        android:textColorHint="@color/gray"
         android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/etName" />
 
@@ -72,24 +72,26 @@
         android:id="@+id/etKey"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="@color/black"
         android:layout_marginTop="10dp"
         android:background="@drawable/bg_edit_text"
         android:hint="Encryption Key"
         android:imeOptions="actionDone"
         android:inputType="text"
-        android:textColorHint="@color/gray"
         android:maxLength="200"
         android:padding="10dp"
+        android:textColor="@color/black"
+        android:textColorHint="@color/gray"
         app:layout_constraintTop_toBottomOf="@id/etAmount" />
-<!--android:text="com.scanner.24e2c72b-6506-490d-a818-4112526db233"-->
-    <Button
+    <!--android:text="com.scanner.24e2c72b-6506-490d-a818-4112526db233"-->
+    <androidx.appcompat.widget.AppCompatButton
         android:id="@+id/btnDone"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
+        android:background="@drawable/bg_round_button"
         android:padding="15dp"
         android:text="Done"
+        android:textColor="@color/white"
         app:layout_constraintTop_toBottomOf="@id/etKey" />
 
 

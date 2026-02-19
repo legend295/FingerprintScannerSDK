@@ -29,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 internal class FingerprintHelper(
     private val context: Context
@@ -637,6 +638,8 @@ internal class FingerprintHelper(
             logDebug("FingerprintService::isSessionOpen")
             isFirstOpen = reader[0]?.isSessionOpen() ?: false
             isSecondOpen = reader[1]?.isSessionOpen() ?: false
+            Log.d("WaxdPosLib", "FingerprintService[0]::isSessionOpen - $isFirstOpen")
+            Log.d("WaxdPosLib", "FingerprintService[1]::isSessionOpen - $isSecondOpen")
             if (isFirstOpen && isSecondOpen) {
                 readerStatus = ReaderStatus.SESSION_OPEN
                 sessionHelper.onSessionChanges(readerStatus)
@@ -844,12 +847,27 @@ internal class FingerprintHelper(
             val folder = File(dirPath)
             deleteFolder(folder)
         }
-        if (reader[0]?.scanAndExtract(defaultSavePath) != true ||
+        // Reset completion counter for this scan session.
+        extractionCompleteStatus.clear()
+        identificationCompleteStatus.clear()
+
+        // Launch both readers independently; scanAndExtract() starts a Thread and
+        // returns true/false only based on whether Thread.start() succeeded.
+        val reader0Started = reader[0]?.scanAndExtract(defaultSavePath) == true
+        val reader1Started = reader[1]?.scanAndExtract(defaultSavePath) == true
+
+        if (!reader0Started || !reader1Started) {
+            // At least one reader failed to even start its scan thread.
+            readerStatus = ReaderStatus.FINGERS_READ_FAILED
+            sessionHelper.onSessionChanges(readerStatus, err)
+        }
+
+        /*if (reader[0]?.scanAndExtract(defaultSavePath) != true ||
             reader[1]?.scanAndExtract(defaultSavePath) != true
         ) {
             readerStatus = ReaderStatus.FINGERS_READ_FAILED
             sessionHelper.onSessionChanges(readerStatus, err)
-        }
+        }*/
     }
 
     private fun deleteFolder(folder: File) {
@@ -876,7 +894,9 @@ internal class FingerprintHelper(
 
 
     val extractionCompleteStatus = HashMap<Int, Boolean>()
+    val identificationCompleteStatus = HashMap<Int, Boolean>()
 
+    //    private val extractionCompleteCount = AtomicInteger(0)
     private val fingerListener = object : FingerprintListener {
         override fun showResult(
             image: ByteArray?,
@@ -900,6 +920,9 @@ internal class FingerprintHelper(
             extractionCompleteStatus[readerNo] = true
             if (extractionCompleteStatus.size >= 2)
                 fingerprintListener.onScanExtractCompleted(readerNo)
+//            if (extractionCompleteCount.incrementAndGet() >= numReaders) {
+//                fingerprintListener.onScanExtractCompleted(readerNo)
+//            }
         }
 
         override fun onReaderStatusChange(
@@ -919,7 +942,9 @@ internal class FingerprintHelper(
         }
 
         override fun identificationResult(result: NBBiometricsIdentifyResult?, readerNo: Int) {
-            fingerprintListener.identificationResult(result, readerNo)
+            /*   identificationCompleteStatus[readerNo] = true
+               if (identificationCompleteStatus.size >= 2)*/
+                fingerprintListener.identificationResult(result, readerNo)
         }
     }
 

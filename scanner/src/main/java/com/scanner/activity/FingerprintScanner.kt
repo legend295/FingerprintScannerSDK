@@ -118,10 +118,10 @@ class FingerprintScanner {
             if (options.skipFirebaseActions) return
             if (options.uniqueId == null) throw NullPointerException("Bvn number cannot be null")
             require(options.uniqueId!!.isNotEmpty()) { "Bvn number cannot be empty" }
-            if (options.scanningType == ScanningType.REGISTRATION) {
+            /*if (options.scanningType == ScanningType.REGISTRATION) {
                 if (options.phoneNumber == null) throw NullPointerException("Phone number cannot be null")
                 require(options.phoneNumber!!.isNotEmpty()) { "Phone number cannot be empty" }
-            } else if (options.scanningType == ScanningType.VERIFICATION) {
+            } else*/ if (options.scanningType == ScanningType.VERIFICATION) {
                 if (options.amount == null) throw NullPointerException("Please enter amount")
                 require((options.amount ?: 0) > 0) { "Please enter valid amount" }
             }

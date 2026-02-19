@@ -1,13 +1,19 @@
 package com.fingerprintscanner.utility
 
 import android.content.Context
+import android.graphics.Color
 import android.text.InputType
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.widget.AppCompatEditText
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.fingerprintscanner.R
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.scanner.utils.enums.ScanningType
 
@@ -33,6 +39,8 @@ fun Context.showFieldsDialog(
         amount.visibility = View.VISIBLE
         amount.imeOptions = EditorInfo.IME_ACTION_DONE
     }
+    name.visibility = View.GONE
+    etKey.visibility = View.GONE
     layout.findViewById<Button>(R.id.btnDone).setOnClickListener {
         if (amount.text.isNullOrEmpty() && type == ScanningType.VERIFICATION) {
             Toast.makeText(sheet.context, "Amount is required", Toast.LENGTH_SHORT).show()
@@ -47,6 +55,19 @@ fun Context.showFieldsDialog(
         )
     }
     sheet.setContentView(layout)
+    sheet.setCommonSettings()
     sheet.show()
     return sheet
+}
+
+fun BottomSheetDialog.setCommonSettings() {
+    behavior.skipCollapsed = true
+    behavior.state = BottomSheetBehavior.STATE_EXPANDED
+
+    dismissWithAnimation = true
+    window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN)
+    window?.setBackgroundDrawable(Color.TRANSPARENT.toDrawable())
+    window?.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+    window?.setDimAmount(0.4f)
+    window?.statusBarColor = Color.TRANSPARENT
 }

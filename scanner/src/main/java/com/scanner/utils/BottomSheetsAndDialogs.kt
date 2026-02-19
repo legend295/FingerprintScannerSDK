@@ -58,16 +58,16 @@ internal fun Context.verificationDialog(
         progressBar.visibility = View.GONE
         ivClose.visibility = View.VISIBLE
         ivStatus.visibility = View.VISIBLE
-        message.visibility = View.GONE
+        message.visibility = if (isSuccess) View.GONE else View.VISIBLE
         ivStatus.setImageDrawable(
             ContextCompat.getDrawable(
                 this@verificationDialog,
                 if (isSuccess) R.drawable.ic_success else R.drawable.ic_failure
             )
         )
-        title.text = if (isSuccess) "Transaction Authorised" else "Transaction Failed"
+        title.text = if (isSuccess) "Transaction Authorised" else "Verification Failed"
         message.text =
-            if (isSuccess) "The fingerprint authorization is\nsucceeded." else "The fingerprint authorization is\nfailed."
+            if (isSuccess) "The fingerprint authorization is\nsucceeded." else "The fingerprint provided does not match the details used during registration. Please try again using the registered fingerprint."
         ivClose.setOnClickListener {
             dialog.dismiss()
             callback()

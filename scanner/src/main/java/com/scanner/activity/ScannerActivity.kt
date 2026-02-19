@@ -131,6 +131,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private var verificationDialog: Dialog? = null
 
     private val identificationResult = HashMap<Int, NBBiometricsIdentifyResult?>()
+    private val identificationPreviewResult = HashMap<Int, PreviewListenerType?>()
     private val locationWrapper: LocationWrapper = LocationWrapper(this)
     private var timer: CountDownTimer? = null
     private var alertDialog: AlertDialog? = null
@@ -150,6 +151,8 @@ internal class ScannerActivity : AppCompatActivity() {
 
     private var storagePath = STORAGE_PATH
 
+    private var sleepModeDisabledForBothReaders = HashMap<Int, Boolean>()
+
     companion object {
         var location: LatLng? = null
         const val STORAGE_PATH = "biometrics/"
@@ -162,6 +165,8 @@ internal class ScannerActivity : AppCompatActivity() {
         list = ArrayList()
         templateList = ArrayList()
         identificationResult.clear()
+        identificationPreviewResult.clear()
+        sleepModeDisabledForBothReaders.clear()
         verificationDialog = null
 
 
@@ -362,7 +367,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     dialog.dismiss()
                     if (location == null)
 //                        handleMessage("Unable to fetch current location. Please restart the application") {
-                        handleMessage("Unable to fetch current location.") {
+                        handleMessage(title = "", "Unable to fetch current location.") {
 //                            finish()
                             init()
                         }
@@ -392,7 +397,10 @@ internal class ScannerActivity : AppCompatActivity() {
                             storageRef.child("$storagePath${bvnNumber}/").listAll()
                         runBlocking {
                             if (userFound && user?.fingerPrintSyncedOnCloud == true && storageListRef.await().items.size == 2) {
-                                handleMessageAndFinish("The user is already registered with entered Unique number. Please try with new BVN.")
+                                handleMessageAndFinish(
+                                    title = "",
+                                    "The user is already registered with entered Unique number. Please try with new BVN."
+                                )
                             } else {
 //                            doesFileExistsInLocalStorage(this@ScannerActivity, bvnNumber){}
                                 saveUserToDB()
@@ -444,7 +452,10 @@ internal class ScannerActivity : AppCompatActivity() {
                             }
                         } else {
                             hideFingerprintDownloadDialog()
-                            handleMessageAndFinish("User not found.")
+                            handleMessageAndFinish(
+                                "Account not found.",
+                                msg = "No account was found for the BVN entered. Please verify your details or register to proceed."
+                            )
                             logDebug("ScannerActivity:: --> User not found...")
                         }
                     }
@@ -470,20 +481,20 @@ internal class ScannerActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleMessageAndFinish(msg: String) {
+    private fun handleMessageAndFinish(title: String, msg: String) {
         runOnUiThread {
-            AlertDialog.Builder(this).setMessage(msg).setPositiveButton("Ok") { dialog, _ ->
+            AlertDialog.Builder(this).setTitle(title).setMessage(msg).setPositiveButton("Ok") { dialog, _ ->
                 dialog.dismiss()
                 finish()
             }.show()
         }
     }
 
-    private fun handleMessage(msg: String, callback: () -> Unit) {
+    private fun handleMessage(title: String, msg: String, callback: () -> Unit) {
         runOnUiThread {
             alertDialog?.dismiss()
             alertDialog =
-                AlertDialog.Builder(this).setMessage(msg).setPositiveButton("Ok") { dialog, _ ->
+                AlertDialog.Builder(this).setTitle(title).setMessage(msg).setPositiveButton("Ok") { dialog, _ ->
                     dialog.dismiss()
                     callback()
                 }.show()
@@ -585,6 +596,7 @@ internal class ScannerActivity : AppCompatActivity() {
      * showing a practical approach to async hardware interaction within an app.
      */
     private fun handleClick() {
+        sleepModeDisabledForBothReaders.clear()
         when (readerStatus) {
             // Handles the case when the service is bound to the application or a session with the reader is already open.
             ReaderStatus.SERVICE_BOUND, ReaderStatus.SESSION_OPEN -> {
@@ -620,7 +632,7 @@ internal class ScannerActivity : AppCompatActivity() {
             ReaderStatus.FINGERS_READ_SUCCESS, ReaderStatus.FINGERS_RELEASED -> {
                 if (list.isEmpty()) { // Check if the data list is unexpectedly empty.
                     // Inform the user no data was found.
-                    handleMessage("No data found.") {}
+                    handleMessage("Error", "Finger print not found.") {}
                     return
                 }
                 val intent = Intent()
@@ -817,7 +829,7 @@ internal class ScannerActivity : AppCompatActivity() {
                     resetImages()
                     sleepModeTrack++
                     val msg =
-                        "Device is in sleep mode. Please touch the finger sensor to wake it up."
+                        "Device is in sleep mode. Please touch both the finger sensor to wake them up."
                     setMessage(msg)
                     runOnUiThread {
                         handleCancelButtonsVisibility(isVisible = false)
@@ -1208,7 +1220,7 @@ internal class ScannerActivity : AppCompatActivity() {
         }
 
         override fun showMessage(message: String?, isErrorMessage: Boolean, readerNo: Int) {
-            this@ScannerActivity.showMessage(message, isErrorMessage)
+            this@ScannerActivity.showMessage(message, isErrorMessage, readerNo)
         }
 
         override fun onScanExtractCompleted(readerNo: Int) {
@@ -1241,7 +1253,10 @@ internal class ScannerActivity : AppCompatActivity() {
                             setStartButtonMessage("Done", true)
                             handleCancelButtonsVisibility(isVisible = false)
                             setMessage(getString(R.string.read_success))
-                            handleMessage("User successfully registered") {}
+                            handleMessage(
+                                title = "Registration Successful",
+                                "Your account has been successfully created using the provided BVN and fingerprint details. You can now proceed with transactions and fingerprint verification."
+                            ) {}
                         }
                     }
                 }
@@ -1273,8 +1288,12 @@ internal class ScannerActivity : AppCompatActivity() {
 
         override fun identificationResult(result: NBBiometricsIdentifyResult?, readerNo: Int) {
             Log.d(ScannerActivity::class.simpleName, "Called times - ${readerNo}")
-            if (result?.status != NBBiometricsStatus.OK) {
-                if (result?.status == NBBiometricsStatus.MATCH_NOT_FOUND) {
+            if (result == null) {
+                setMessage("Verification failed. No valid fingerprint found. Please try again.")
+                return
+            }
+            if (result.status != NBBiometricsStatus.OK) {
+                if (result.status == NBBiometricsStatus.MATCH_NOT_FOUND) {
                     readerStatus = ReaderStatus.FINGERS_VERIFICATION_FAILED
                     runOnUiThread {
                         if (verificationDialog == null)
@@ -1330,6 +1349,12 @@ internal class ScannerActivity : AppCompatActivity() {
         println("PreviewListenerType ------------------- reader no - $readerNo ------- ${previewListenerType.name}")
         println("NBDeviceScanStatus ------------------- reader no - $readerNo ------- ${this.name}")
 
+        sleepModeDisabledForBothReaders.remove(readerNo)
+        if (sleepModeDisabledForBothReaders.isNotEmpty()) {
+//            enableLowPowerMode()
+            return
+        }
+
         when (this) {
             NBDeviceScanStatus.NONE -> {}
             NBDeviceScanStatus.OK -> {}
@@ -1357,16 +1382,18 @@ internal class ScannerActivity : AppCompatActivity() {
                         handleMessage("User successfully registered") {}
                     }*/
                 } else {
-                    if (previewListenerType == PreviewListenerType.EXTRACTION) {
-                        readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
-                        setMessage("Finger read successful. Verifying..")
-                    } else {
-                        readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
-                        setStartButtonMessage("Done", true)
-                        isFingerprintScanningInProgress = false
-                        handleCancelButtonsVisibility(isVisible = false)
-                        setMessage(getString(R.string.read_success))
-                    }
+                    identificationPreviewResult[readerNo] = previewListenerType
+                    if (identificationPreviewResult.size >= 2)
+                        if (previewListenerType == PreviewListenerType.EXTRACTION) {
+                            readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                            setMessage("Finger read successful. Verifying..")
+                        } else {
+                            readerStatus = ReaderStatus.FINGERS_VERIFICATION_SUCCESS
+                            setStartButtonMessage("Done", true)
+                            isFingerprintScanningInProgress = false
+                            handleCancelButtonsVisibility(isVisible = false)
+                            setMessage(getString(R.string.read_success))
+                        }
                 }
 //                fingerprintHelper.waitFingersRelease()
             }
@@ -1425,9 +1452,10 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     private var scope: CoroutineScope? = null
-    private fun showMessage(message: String?, isErrorMessage: Boolean) {
+    private fun showMessage(message: String?, isErrorMessage: Boolean, readerNo: Int) {
         runOnUiThread {
             if (message.equals("ERROR: Invalid operation", ignoreCase = true)) {
+                sleepModeDisabledForBothReaders[readerNo] = true
                 this@ScannerActivity.readerStatus = ReaderStatus.LOW_POWER_MODE
                 onSessionChanges.onSessionChanges(ReaderStatus.LOW_POWER_MODE)
                 /* runOnUiThread {
@@ -1794,7 +1822,7 @@ internal class ScannerActivity : AppCompatActivity() {
                 storageList.save(callback)
             } else {
                 // THis will finish the activity so we don't need to send callback here
-                handleMessageAndFinish("No files found over local and server database")
+                handleMessageAndFinish("Files", "No files found over local and server database")
 //                callback(false)
             }
 
@@ -1808,24 +1836,28 @@ internal class ScannerActivity : AppCompatActivity() {
             it.printStackTrace()
             Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
             // THis will finish the activity so we don't need to send callback here
-            handleMessageAndFinish("Not able to fetch files")
+            handleMessageAndFinish(
+                "Error",
+                "Enable to download files from database. Contact Support for further assistance."
+            )
             logError("ScannerActivity:: --> File download from firebase storage failed ${it.message}")
             NewRelic.recordHandledException(it)
         }
 
     }
 
-    private fun ArrayList<StorageReference>.save(callback: (Boolean) -> Unit) {
+    /*private fun ArrayList<StorageReference>.save(callback: (Boolean) -> Unit) {
         val tempFileList = ArrayList<File>()
         forEachIndexed { index, storageReference ->
             val gsReference = storage.getReferenceFromUrl(
                 storageReference.toString(),
             )
             val dirPath = filesDir.path + "/${scanningOptions?.uniqueId!!}/"
-            val filePath = dirPath + createFileName() + index + "-ISO-Template.bin"
+//            val filePath = dirPath + createFileName() + index + "-ISO-Template.dat"
+            val filePath = dirPath + storageReference.name
             val files = File(dirPath)
             files.mkdirs()
-            gsReference.getFile(File(filePath)).addOnSuccessListener {
+            storageReference.getFile(File(filePath)).addOnSuccessListener {
                 Log.d(
                     ScannerActivity::class.simpleName,
                     "Files downloaded to local storage - ${files.path}"
@@ -1841,11 +1873,84 @@ internal class ScannerActivity : AppCompatActivity() {
 //                callback(false)
                 it.printStackTrace()
                 Log.e(ScannerActivity::class.simpleName, "Files over storage - ${it.message}")
-                handleMessageAndFinish("Not able to download files")
+                handleMessageAndFinish(
+                    "Error",
+                    "Unable to download files from storage. Contact Support for further assistance"
+                )
                 logError("ScannerActivity:: --> save :: File download failed ${it.message}")
                 NewRelic.recordHandledException(it)
 
             }
+        }
+    }*/
+
+    private fun List<StorageReference>.save(callback: (Boolean) -> Unit) {
+        if (this.isEmpty()) {
+            callback(true)
+            return
+        }
+
+        // 1. Safely handle the uniqueId instead of using the risky !! operator
+        val uniqueId = scanningOptions?.uniqueId
+        if (uniqueId == null) {
+            logError("ScannerActivity:: --> save :: uniqueId is null")
+            callback(false)
+            return
+        }
+
+        // 2. Use File constructors instead of string concatenation (safer for paths)
+        val targetDir = File(filesDir, uniqueId)
+
+        // 3. Create the directory just ONCE outside the loop
+        targetDir.mkdirs()
+
+        var successfulDownloads = 0
+        var hasFailed = false // Prevents showing the error dialog multiple times
+
+        // 4. Use a standard forEach since 'index' is no longer needed
+        this.forEach { storageReference ->
+            val destinationFile = File(targetDir, storageReference.name)
+
+            // 5. Use storageReference directly (removed the redundant getReferenceFromUrl)
+            storageReference.getFile(destinationFile)
+                .addOnSuccessListener {
+                    if (hasFailed) return@addOnSuccessListener // Stop if another file already failed
+
+                    Log.d(
+                        ScannerActivity::class.simpleName,
+                        "File downloaded to local storage - ${destinationFile.path}"
+                    )
+
+                    // 6. Use a simple integer counter instead of an ArrayList for tracking completion
+                    successfulDownloads++
+                    if (successfulDownloads == this.size) {
+                        callback(true)
+                    }
+                }
+                .addOnProgressListener {
+                    val progress = (100.0 * it.bytesTransferred) / it.totalByteCount
+                    Log.d(
+                        ScannerActivity::class.simpleName,
+                        "Download progress for ${storageReference.name}: $progress% done"
+                    )
+                }
+                .addOnFailureListener { exception ->
+                    if (hasFailed) return@addOnFailureListener
+                    hasFailed = true // Lock the failure state so we only trigger this once
+
+                    exception.printStackTrace()
+                    Log.e(ScannerActivity::class.simpleName, "Files over storage - ${exception.message}")
+                    logError("ScannerActivity:: --> save :: File download failed ${exception.message}")
+                    NewRelic.recordHandledException(exception)
+
+                    // 7. ALWAYS call callback(false) so your UI doesn't hang forever with a loading spinner!
+                    callback(false)
+
+                    handleMessageAndFinish(
+                        "Error",
+                        "Unable to download files from storage. Contact Support for further assistance"
+                    )
+                }
         }
     }
 
