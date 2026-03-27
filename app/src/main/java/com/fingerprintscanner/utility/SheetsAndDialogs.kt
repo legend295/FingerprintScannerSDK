@@ -24,6 +24,8 @@ private val phoneNumber =
 
 fun Context.showFieldsDialog(
     type: ScanningType,
+    preFillBvn: String? = null,
+    preFillPhone: String? = null,
     callback: (String, String, String, String, String) -> Unit
 ): BottomSheetDialog {
     val sheet = BottomSheetDialog(this, R.style.BottomSheetStyle)
@@ -33,6 +35,16 @@ fun Context.showFieldsDialog(
     val amount = layout.findViewById<AppCompatEditText>(R.id.etAmount)
     val name = layout.findViewById<AppCompatEditText>(R.id.etName)
     val etKey = layout.findViewById<AppCompatEditText>(R.id.etKey)
+
+    if (!preFillBvn.isNullOrEmpty()) {
+        bvnNumber.setText(preFillBvn)
+//        bvnNumber.isEnabled = false
+    }
+    if (!preFillPhone.isNullOrEmpty()) {
+        phoneNumber.setText(preFillPhone)
+//        phoneNumber.isEnabled = false
+    }
+
     if (type == ScanningType.VERIFICATION) {
         phoneNumber.visibility = View.GONE
         name.visibility = View.GONE
@@ -44,6 +56,10 @@ fun Context.showFieldsDialog(
     layout.findViewById<Button>(R.id.btnDone).setOnClickListener {
         if (amount.text.isNullOrEmpty() && type == ScanningType.VERIFICATION) {
             Toast.makeText(sheet.context, "Amount is required", Toast.LENGTH_SHORT).show()
+            return@setOnClickListener
+        }
+        if (bvnNumber.text.isNullOrEmpty()) {
+            Toast.makeText(sheet.context, "BVN number is required", Toast.LENGTH_SHORT).show()
             return@setOnClickListener
         }
         callback(

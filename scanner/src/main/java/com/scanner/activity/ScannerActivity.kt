@@ -123,6 +123,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private val storageRef = storage.reference
     private val uploadedFileRefs = ArrayList<String>()
     private val uploadedFileRefsCache = ArrayList<String>()
+    private val uploadedBmpRefs = ArrayList<String>()
     private val localFileRefs = ArrayList<String>()
     private val localFileRefsCache = ArrayList<String>()
 
@@ -138,6 +139,7 @@ internal class ScannerActivity : AppCompatActivity() {
     private var currentUser: User? = null
     private var skipLocation = false
     private var skipFirebaseActions = false
+    private var uploadBmpToFirebase = false
 
     // if sleepModeTrack is equal to 3 then reinitialize the fingerprints
     // increment this when every sleep model trigger
@@ -188,6 +190,7 @@ internal class ScannerActivity : AppCompatActivity() {
         scanningOptions = Gson().fromJson(options, BuilderOptions::class.java)
         skipLocation = scanningOptions?.skipLocation ?: false
         skipFirebaseActions = scanningOptions?.skipFirebaseActions ?: false
+        uploadBmpToFirebase = scanningOptions?.uploadBmpToFirebase ?: false
 
         if (!skipFirebaseActions) {
             // get all users whose FINGER_PRINT_SYNCED_ON_CLOUD is false from cache and upload files
@@ -233,6 +236,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
         areBothFingerprintScannedSuccessfully.clear()
         fingerprintFiles.clear()
+        uploadedBmpRefs.clear()
         fingerprintHelper?.setSessionHelper(sessionHelper = onSessionChanges)
         fingerprintHelper?.setFingerprintListener(fingerprintListener = fingerprintListener)
         fingerprintHelper?.setListOfTemplate(listOfTemplate = listOfTemplate)
@@ -708,6 +712,7 @@ internal class ScannerActivity : AppCompatActivity() {
         localFileRefsCache.clear()
         uploadedFileRefs.clear()
         uploadedFileRefsCache.clear()
+        uploadedBmpRefs.clear()
     }
 
     override fun onResume() {
@@ -1167,6 +1172,13 @@ internal class ScannerActivity : AppCompatActivity() {
                     if (readerNo == 0) {
                         ivScannerLeft?.setImageURI(Uri.fromFile(file))
                     } else ivScannerRight?.setImageURI(Uri.fromFile(file))
+                }
+                if (uploadBmpToFirebase && !skipFirebaseActions && path.endsWith(".bmp")) {
+                    scanningOptions?.uniqueId?.let { uid ->
+                        uploadBmpToFirebaseStorage(uid, Uri.fromFile(file)) { success ->
+                            Log.d(ScannerActivity::class.simpleName, "BMP upload for reader $readerNo: $success")
+                        }
+                    }
                 }
             }
 
@@ -1727,6 +1739,37 @@ internal class ScannerActivity : AppCompatActivity() {
             logError("ScannerActivity:: --> File upload failed ${it.message}")
             NewRelic.recordHandledException(it)
         }
+    }
+
+    private fun uploadBmpToFirebaseStorage(
+        bvnNumber: String,
+        uri: Uri,
+        callback: (Boolean) -> Unit
+    ) {
+        val fileRef = storageRef.child("$storagePath${bvnNumber}/${uri.lastPathSegment}")
+        fileRef.putFile(uri)
+            .addOnProgressListener {
+                val progress = (100.0 * it.bytesTransferred) / it.totalByteCount
+                Log.d(ScannerActivity::class.simpleName, "BMP upload is $progress% done")
+            }.addOnSuccessListener {
+                Log.d(ScannerActivity::class.simpleName, "BMP upload success: ${fileRef.path}")
+                uploadedBmpRefs.add(fileRef.path)
+                if (uploadedBmpRefs.size == 2) {
+                    updateUserInDb(
+                        bvnNumber,
+                        hashMapOf("fingerPrintBmpCloudPath" to uploadedBmpRefs.toList())
+                    ) {
+                        uploadedBmpRefs.clear()
+                        callback(it)
+                    }
+                } else {
+                    callback(true)
+                }
+            }.addOnFailureListener {
+                Log.e(ScannerActivity::class.simpleName, "BMP upload failed: ${it.message}")
+                logError("ScannerActivity:: BMP upload failed ${it.message}")
+                callback(false)
+            }
     }
 
     /**

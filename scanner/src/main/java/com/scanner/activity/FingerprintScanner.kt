@@ -100,6 +100,10 @@ class FingerprintScanner {
             return this
         }
 
+        fun uploadBmpToFirebase(enable: Boolean): Builder {
+            options.uploadBmpToFirebase = enable
+            return this
+        }
 
         fun start(
             activity: Activity,

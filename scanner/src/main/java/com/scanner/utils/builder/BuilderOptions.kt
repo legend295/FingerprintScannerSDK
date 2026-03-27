@@ -21,6 +21,7 @@ internal class BuilderOptions {
     var storagePath: String? = null
     var skipFirebaseActions: Boolean = false
     var enableBmpExport: Boolean = false
+    var uploadBmpToFirebase: Boolean = false
 //    var firebaseFireStore: FirebaseFirestore? = null
 }
 

@@ -17,11 +17,14 @@ import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.ScanningType
 import org.json.JSONObject
 import java.io.File
+import androidx.core.content.edit
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
     private var tvStatus: AppCompatTextView? = null
     private var sheet: BottomSheetDialog? = null
     private var progressBar: ContentLoadingProgressBar? = null
+    private var pendingBvn: String? = null
     private val themeOptions = ThemeOptions().apply {
         buttonColor = R.color.black
         buttonTextColor = R.color.white
@@ -48,62 +51,50 @@ class MainActivity : AppCompatActivity() {
 
 
         tvRegistration.setOnClickListener {
-//            startScanning()
-//            return@setOnClickListener
-            sheet =
-                showFieldsDialog(ScanningType.REGISTRATION) { bvnNumber, phoneNumber, name, _, key ->
-                    sheet?.dismiss()
-//                    startRegistration(bvnNumber, phoneNumber)
-//                    return@showFieldsDialog
-                    progressBar?.show()
-                    FingerprintScanner().getUser(bvnNumber) { isSuccess, user ->
-                        if (user == null) {
+            val generatedBvn = generateBvnNumber()
+            val generatedPhone = generatedBvn.take(10)
+            sheet = showFieldsDialog(
+                type = ScanningType.REGISTRATION,
+                preFillBvn = generatedBvn,
+                preFillPhone = generatedPhone
+            ) { bvnNumber, phoneNumber, _, _, _ ->
+                sheet?.dismiss()
+                progressBar?.show()
+                FingerprintScanner().getUser(bvnNumber) { _, user ->
+                    if (user == null) {
+                        progressBar?.hide()
+                        startRegistration(bvnNumber, phoneNumber)
+                        return@getUser
+                    }
+                    FingerprintScanner().doesFileExistsInLocalStorage(this, bvnNumber) { doesExist ->
+                        if (doesExist)
+                            FingerprintScanner().uploadFiles(this, user) { _, msg ->
+                                progressBar?.hide()
+                                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        else {
                             progressBar?.hide()
                             startRegistration(bvnNumber, phoneNumber)
-                            return@getUser
-                        }
-                        FingerprintScanner().doesFileExistsInLocalStorage(
-                            this,
-                            bvnNumber
-                        ) { doesExist ->
-                            if (doesExist)
-                                FingerprintScanner().uploadFiles(this, user) { isSuccess, msg ->
-                                    progressBar?.hide()
-                                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-                                }
-                            else {
-                                progressBar?.hide()
-                                startRegistration(bvnNumber, phoneNumber)
-                            }
                         }
                     }
                 }
-
-
-            /* if (FingerprintScanner().doesFileExistsInLocalStorage(this, "99999999914")) {
-                 println("Files found in local storage")
-                 FingerprintScanner().getUser("99999999914") { isSuccess, user ->
-                     if (isSuccess && user?.fingerPrintSyncedOnCloud == false) {
-                         Log.d(MainActivity::class.simpleName, "By Unique Id - $user")
-                         FingerprintScanner().uploadFiles(
-                             this,
-                             user
-                         ) { _, msg ->
-                             println("MainActivity File upload - $msg")
-                         }
-                     } else {
-                         println("User not found")
-                     }
-                 }
-
-             } else println("Files not found in local storage")*/
-
+            }
         }
 
         tvVerification.setOnClickListener {
-            sheet = showFieldsDialog(ScanningType.VERIFICATION) { bvnNumber, _, _, amount, key ->
-                FingerprintScanner.Builder(this).setUniqueId(bvnNumber)
-                    .setAmount(amount.toInt())
+            val registeredBvn = getRegisteredBvn()
+            sheet = showFieldsDialog(
+                type = ScanningType.VERIFICATION,
+                preFillBvn = registeredBvn,
+                preFillPhone = ""
+            ) { bvnNumber, phoneNumber, _, amount, _ ->
+                sheet?.dismiss()
+                pendingBvn = null
+//                progressBar?.show()
+                val finalAmount = if (amount.isEmpty()) 100 else amount.toInt()
+                FingerprintScanner.Builder(this)
+                    .setUniqueId(bvnNumber)
+                    .setAmount(finalAmount)
                     .setScanningType(ScanningType.VERIFICATION)
                     .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
                     .skipLocation(skipLocation = false)
@@ -111,6 +102,12 @@ class MainActivity : AppCompatActivity() {
                     .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
                     .start(this, scanningLauncher)
             }
+
+//            if (registeredBvn == null) {
+//                Toast.makeText(this, "No user found. Please register first.", Toast.LENGTH_SHORT).show()
+//                return@setOnClickListener
+//            }
+
         }
 
 
@@ -137,6 +134,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRegistration(bvnNumber: String, phoneNumber: String) {
+        pendingBvn = bvnNumber
         FingerprintScanner.Builder(this)
             .setUniqueId(bvnNumber)
             .setPhoneNumber(phoneNumber)
@@ -148,8 +146,31 @@ class MainActivity : AppCompatActivity() {
                 put("pin", 1234)
             })
             .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
-            .skipLocation(skipLocation = true)
+            .skipLocation(skipLocation = false)
+            .enableBmpExport(enable = true)
+            .uploadBmpToFirebase(enable = true)
             .start(this, scanningLauncher)
+    }
+
+    private fun generateBvnNumber(): String {
+        val lastRegisteredBvn = getRegisteredBvn()
+        val lastSuffix = lastRegisteredBvn?.takeLast(4)?.toIntOrNull() ?: 0
+        val nextSuffix = (lastSuffix + 1).coerceAtMost(9999)
+        return "9999999${nextSuffix.toString().padStart(4, '0')}"
+    }
+
+    private fun saveRegisteredBvn(bvn: String) {
+        /*val dir = File("${filesDir.path}/$bvn/")
+        val datCount = dir.listFiles { f -> f.name.endsWith(".dat") }?.size ?: 0
+        if (datCount >= 2) {*/
+            getSharedPreferences("scanner_prefs", MODE_PRIVATE)
+                .edit { putString("registered_bvn", bvn) }
+//        }
+    }
+
+    private fun getRegisteredBvn(): String? {
+        return getSharedPreferences("scanner_prefs", MODE_PRIVATE)
+            .getString("registered_bvn", null)
     }
 
     private fun startScanning() {
@@ -183,12 +204,16 @@ class MainActivity : AppCompatActivity() {
                 val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
                 val templateList: ArrayList<File>? =
                     it.data?.serializable(ScannerConstants.TEMPLATE_DATA)
-//                val customObject: JSONObject =
-//                    (it.data?.getStringExtra(ScannerConstants.CUSTOM_DATA).toString()) as JSONObject
-//                Log.d(MainActivity::class.simpleName, customObject.toString())
                 val isVerified: Boolean? =
                     it.data?.getBooleanExtra(ScannerConstants.VERIFICATION_RESULT, false)
                 Log.d(MainActivity::class.simpleName, list?.size.toString())
+
+                // Both fingerprints scanned and saved → persist BVN for future verification
+                if (pendingBvn != null) {
+                    saveRegisteredBvn(pendingBvn!!)
+                    pendingBvn = null
+                }
+
                 handleResponse(list, isVerified, templateList)
             }
         }
