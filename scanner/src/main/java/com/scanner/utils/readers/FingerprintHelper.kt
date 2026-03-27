@@ -228,6 +228,7 @@ internal class FingerprintHelper(
                     reader[i]?.setBvnNumber(it)
                 }
                 reader[i]?.setSkipFirebaseActions(skipFirebaseActions)
+                reader[i]?.setEnableBmpExport(enableBmpExport)
                 if (reader[i]?.init() != true) {
                     Log.d(
                         "WaxdPosLib",
@@ -313,6 +314,7 @@ internal class FingerprintHelper(
                     it?.setBvnNumber(number)
                 }
                 it?.setSkipFirebaseActions(skipFirebaseActions)
+                it?.setEnableBmpExport(enableBmpExport)
             }
             if (started) {
                 Log.d("WaxdPosLib", "FingerprintService::Start -> already started")
@@ -958,5 +960,13 @@ internal class FingerprintHelper(
 
     fun setSkipFirebaseActions(skipFirebaseActions: Boolean) {
         this.skipFirebaseActions = skipFirebaseActions
+    }
+
+    private var enableBmpExport: Boolean = false
+
+    fun setEnableBmpExport(enable: Boolean) {
+        this.enableBmpExport = enable
+        reader[0]?.setEnableBmpExport(enable)
+        reader[1]?.setEnableBmpExport(enable)
     }
 }

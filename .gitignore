@@ -103,3 +103,6 @@ hs_err_pid*
 **/*.iml
 *.class
 newrelic.properties
+CLAUDE.md
+.claude
+scanner/documentation

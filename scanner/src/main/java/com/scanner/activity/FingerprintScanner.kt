@@ -95,6 +95,11 @@ class FingerprintScanner {
             return this
         }
 
+        fun enableBmpExport(enable: Boolean): Builder {
+            options.enableBmpExport = enable
+            return this
+        }
+
 
         fun start(
             activity: Activity,

@@ -20,6 +20,7 @@ internal class BuilderOptions {
     var newRelicToken: String? = null
     var storagePath: String? = null
     var skipFirebaseActions: Boolean = false
+    var enableBmpExport: Boolean = false
 //    var firebaseFireStore: FirebaseFirestore? = null
 }
 

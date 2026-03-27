@@ -53,6 +53,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.IntBuffer
 import java.text.SimpleDateFormat
 import java.util.AbstractMap
@@ -112,7 +114,7 @@ internal class FingerprintReader(
     private var spoofScore = MAX_ANTISPOOF_THRESHOLD
 
     //    private val ANTISPOOF_THRESHOLD = DEFAULT_ANTISPOOF_THRESHOLD
-    private val isSpoofEnabled = false
+    private val isSpoofEnabled = true
     private val isBackgroundRefreshEnabled = false
     private var isValidSpoofScore = false
     private val isAutoSaveEnabled = false
@@ -150,6 +152,12 @@ internal class FingerprintReader(
 
     fun setSkipFirebaseActions(skipFirebaseActions: Boolean) {
         this.skipFirebaseActions = skipFirebaseActions
+    }
+
+    private var enableBmpExport: Boolean = false
+
+    fun setEnableBmpExport(enable: Boolean) {
+        this.enableBmpExport = enable
     }
 
     fun setScanningType(scanningType: ScanningType) {
@@ -276,11 +284,22 @@ internal class FingerprintReader(
             readerInfo = info.toString()
             logCustom(info)
             if (isSpoofEnabled) {
-                Log.d(
-                    "WaxdPosLib",
-                    "FingerPrintReader[$readerNo]::Init -> Enable Spoof ..."
-                )
-                enableSpoof()
+                try {
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerPrintReader[$readerNo]::Init -> Enable Spoof ..."
+                    )
+                    enableSpoof()
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerPrintReader[$readerNo]::Init -> Spoof enabled successfully"
+                    )
+                } catch (e: Exception) {
+                    Log.w(
+                        "WaxdPosLib",
+                        "FingerPrintReader[$readerNo]::Init -> Anti-spoof not supported on this device, skipping. ${e.message}"
+                    )
+                }
             }
             init = true
             Log.d("WaxdPosLib", "FingerPrintReader[$readerNo]::Init -> Done")
@@ -700,6 +719,13 @@ internal class FingerprintReader(
                 )
                 logError("FingerprintReader[$readerNo]::Scan -> SaveBitmap FAILED")
             }
+            if (enableBmpExport) {
+                try {
+                    saveBmp(image, path, date)
+                } catch (e: Exception) {
+                    logError("saveBmp failed: ${e.message}")
+                }
+            }
 
             Log.d("WaxdPosLib", "FingerprintReader[$readerNo]::Scan -> Done")
             logDebug("FingerprintReader[$readerNo]::Scan -> Done")
@@ -754,6 +780,46 @@ internal class FingerprintReader(
             )
             false
         }
+    }
+
+    private fun saveBmp(image: ByteArray, path: String, date: Long) {
+        val w = scanFormatInfo!!.width
+        val h = scanFormatInfo!!.height
+        val rowStride = (w + 3) and 3.inv()
+        val pixelDataSize = rowStride * h
+        val fileSize = 14 + 40 + 1024 + pixelDataSize
+
+        val buf = ByteBuffer.allocate(fileSize).order(ByteOrder.LITTLE_ENDIAN)
+
+        // File header
+        buf.put(0x42.toByte()); buf.put(0x4D.toByte())  // "BM"
+        buf.putInt(fileSize)
+        buf.putShort(0); buf.putShort(0)                 // reserved
+        buf.putInt(1078)                                  // pixel data offset
+
+        // DIB header (BITMAPINFOHEADER)
+        buf.putInt(40); buf.putInt(w); buf.putInt(h)
+        buf.putShort(1); buf.putShort(8)                 // planes=1, bpp=8
+        buf.putInt(0); buf.putInt(pixelDataSize)         // compression=BI_RGB, imageSize
+        buf.putInt(0); buf.putInt(0)                     // X/Y pixels per meter
+        buf.putInt(256); buf.putInt(0)                   // colors in table, important colors
+
+        // Grayscale color table: 256 × (B, G, R, 0)
+        for (i in 0..255) {
+            buf.put(i.toByte()); buf.put(i.toByte()); buf.put(i.toByte()); buf.put(0)
+        }
+
+        // Pixel data — BMP rows are bottom-up
+        val padding = ByteArray(rowStride - w)
+        for (y in h - 1 downTo 0) {
+            buf.put(image, y * w, w)
+            buf.put(padding)
+        }
+
+        val filePath = "$path${readerNo}${date}.bmp"
+        File(path).mkdirs()
+        FileOutputStream(filePath).use { it.write(buf.array()) }
+        listener.onBitmapSaveSuccess(filePath, readerNo)
     }
 
     private fun convertToBitmap(
@@ -834,7 +900,7 @@ internal class FingerprintReader(
                     templateType.toString()
                 )
             )
-            val decryptedData = KeyStorePortable.decryptData(fileName, bvnNumber, ScannerApp.getInstance().key?:"")
+            val decryptedData = KeyStorePortable.decryptData(fileName, bvnNumber, ScannerApp.getInstance().key ?: "")
             Log.d(
                 "WaxdPosLib",
                 "FingerprintReader[$readerNo]::loadTemplate -> ${decryptedData?.size ?: 0}"
@@ -855,9 +921,9 @@ internal class FingerprintReader(
                 logDebug("FingerprintReader[$readerNo]::loadTemplate -> array size is empty}")
                 callback(null)
             }
-           /* this.context.decryptData(fileName, bvnNumber, readerNo) {decryptedData->
+            /* this.context.decryptData(fileName, bvnNumber, readerNo) {decryptedData->
 
-            }*/
+             }*/
         } catch (e: Exception) {
             NewRelic.recordHandledException(e)
             e.printStackTrace()
@@ -943,7 +1009,7 @@ internal class FingerprintReader(
 
     private fun enableSpoof() {
         reader?.setParameter(CONFIGURE_ANTISPOOF.toLong(), ENABLE_ANTISPOOF)
-        reader?.setParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong(), spoofThreshold)
+        reader?.setParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong(), ANTISPOOF_THRESHOLD.toInt())
     }
 
     fun getPreviewListener() = previewListener
@@ -1169,6 +1235,13 @@ internal class FingerprintReader(
 
 
                     previewListener.lastImage?.let {
+                        if (enableBmpExport) {
+                            try {
+                                saveBmp(it, path, date)
+                            } catch (e: Exception) {
+                                logError("saveBmp failed: ${e.message}")
+                            }
+                        }
                         val bitmap = convertToBitmaps(scanFormatInfo, it)
                         if (!saveOnlyBitmap(bitmap, path, date)) {
                             Log.e(
@@ -1311,7 +1384,7 @@ internal class FingerprintReader(
                         scanFormatInfo,
                         previewListener,
                         templates.iterator(),
-                        NBBiometricsSecurityLevel.NORMAL
+                        NBBiometricsSecurityLevel.HIGH
                     )
                     timeStop = System.currentTimeMillis()
                     fingerprintListener.identificationResult(result = identifyResult, readerNo)
@@ -1428,13 +1501,13 @@ internal class FingerprintReader(
                     )
 
                     listener.onTemplateSaveSuccess(filePath, readerNo)
-                   /* this@FingerprintReader.context.encryptData(
-                        binaryTemplate,
-                        bvnNumber,
-                        readerNo
-                    ) {encryptedData->
+                    /* this@FingerprintReader.context.encryptData(
+                         binaryTemplate,
+                         bvnNumber,
+                         readerNo
+                     ) {encryptedData->
 
-                    }*/
+                     }*/
                 }
             }
         } catch (e: Exception) {

@@ -242,6 +242,7 @@ internal class ScannerActivity : AppCompatActivity() {
         scanningOptions?.uniqueId?.let { fingerprintHelper?.setBvnNumber(it) }
             ?: run { fingerprintHelper?.setBvnNumber("common") }
         scanningOptions?.skipFirebaseActions?.let { fingerprintHelper?.setSkipFirebaseActions(it) }
+        scanningOptions?.enableBmpExport?.let { fingerprintHelper?.setEnableBmpExport(it) }
         scanningOptions?.scanningType?.let { fingerprintHelper?.setScanningType(it) }
         scanningOptions?.key?.let { ScannerApp.getInstance().key = it }
         storagePath = scanningOptions?.storagePath ?: STORAGE_PATH
