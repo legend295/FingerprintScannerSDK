@@ -12,7 +12,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.CountDownTimer
 import android.provider.Settings
 import android.util.Log
 import android.view.View
@@ -134,7 +133,8 @@ internal class ScannerActivity : AppCompatActivity() {
     private val identificationResult = HashMap<Int, NBBiometricsIdentifyResult?>()
     private val identificationPreviewResult = HashMap<Int, PreviewListenerType?>()
     private val locationWrapper: LocationWrapper = LocationWrapper(this)
-    private var timer: CountDownTimer? = null
+    private val locationTimeoutHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var locationTimeoutRunnable: Runnable? = null
     private var alertDialog: AlertDialog? = null
     private var currentUser: User? = null
     private var skipLocation = false
@@ -355,37 +355,38 @@ internal class ScannerActivity : AppCompatActivity() {
             init()
             return
         }
-        if (locationWrapper.isLocationEnabled(this)) {
-            locationWrapper.getLocation {}
-            val dialog = fetchingLocationDialog(scanningOptions?.themeOptions) {}
-            timer = object : CountDownTimer(10000, 1000) {
-                override fun onTick(millisUntilFinished: Long) {
-                    Log.d(tag, "$location")
-                    if (location != null) {
-                        cancel()
-                        dialog.dismiss()
-                        init()
-                    }
-                }
-
-                override fun onFinish() {
-                    dialog.dismiss()
-                    if (location == null)
-//                        handleMessage("Unable to fetch current location. Please restart the application") {
-                        handleMessage(title = "", "Unable to fetch current location.") {
-//                            finish()
-                            init()
-                        }
-                    else {
-                        init()
-                    }
-                }
-            }.start()
-        } else {
+        if (!locationWrapper.isLocationEnabled(this)) {
             init()
-            /*handleMessage("Please enable location permissions in your settings. User registration requires location access.") {
-                handleLocationEmpty()
-            }*/
+            return
+        }
+
+        val dialog = fetchingLocationDialog(scanningOptions?.themeOptions) {}
+        var settled = false
+
+        fun settle() {
+            if (settled) return
+            settled = true
+            locationTimeoutRunnable?.let { locationTimeoutHandler.removeCallbacks(it) }
+            locationTimeoutRunnable = null
+            locationWrapper.stopUpdates()
+            dialog.dismiss()
+        }
+
+        locationTimeoutRunnable = Runnable {
+            if (settled) return@Runnable
+            settle()
+            if (location == null)
+//                handleMessage(title = "", "Unable to fetch current location.") { init() }
+                init()
+            else
+                init()
+        }
+        locationTimeoutHandler.postDelayed(locationTimeoutRunnable!!, 30_000L)
+
+        locationWrapper.getLocation { _ ->
+            if (settled) return@getLocation
+            settle()
+            init()
         }
     }
 
@@ -918,6 +919,9 @@ internal class ScannerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        locationTimeoutRunnable?.let { locationTimeoutHandler.removeCallbacks(it) }
+        locationTimeoutRunnable = null
+        locationWrapper.stopUpdates()
         alertDialog = null
         enableLowPowerMode()
     }

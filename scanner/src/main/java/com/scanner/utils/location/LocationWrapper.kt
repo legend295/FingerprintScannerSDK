@@ -4,8 +4,9 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
-import android.os.Environment
+import android.os.Bundle
 import android.os.Looper
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -16,130 +17,165 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.android.gms.maps.model.LatLng
 import com.scanner.activity.ScannerActivity
-import java.io.File
-import java.io.FileOutputStream
-import java.io.OutputStreamWriter
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 internal class LocationWrapper(private val activity: Activity) {
-    private lateinit var mFusedLocationClient: FusedLocationProviderClient
+
+    private var fusedLocationClient: FusedLocationProviderClient? = null
+    private var locationCallback: LocationCallback? = null
+    private var legacyLocationListener: LocationListener? = null
+    private var locationManager: LocationManager? = null
 
     @SuppressLint("MissingPermission")
     fun getLocation(isSuccess: (Boolean) -> Unit) {
-        mFusedLocationClient = LocationServices.getFusedLocationProviderClient(activity)
-        getLastLocation(isSuccess)
-        val task = mFusedLocationClient.lastLocation
-        task.addOnSuccessListener { location ->
-            location ?: return@addOnSuccessListener
-            val latLng = LatLng(location.latitude, location.longitude)
-            ScannerActivity.location = latLng
-            saveLocationToFile(latLng,"getLocation")
-            isSuccess(true)
-        }.addOnFailureListener {
-            saveLocationToFile(null,"getLocation")
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun getLastLocation(isSuccess: (Boolean) -> Unit) {
-        if (isLocationEnabled(activity)) {
-            mFusedLocationClient =
-                LocationServices.getFusedLocationProviderClient(activity)
-            val cts = CancellationTokenSource()
-            mFusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_HIGH_ACCURACY,
-                cts.token
-            ).addOnSuccessListener { location ->
-                location?.let {
-                    val latLng = LatLng(it.latitude, it.longitude)
-                    ScannerActivity.location = latLng
-                    saveLocationToFile(latLng,"getLastLocation")
-                }
-            }
-            mFusedLocationClient.lastLocation.addOnCompleteListener(activity) { task ->
-                val location: Location? = task.result
-                if (location == null) {
-                    requestNewLocationData(isSuccess)
-                } else {
-                    val latLng = LatLng(location.latitude, location.longitude)
-                    ScannerActivity.location = latLng
-                    saveLocationToFile(latLng,"getLastLocation")
-                    isSuccess(true)
-                }
-            }
-        } else {
+        if (!isLocationEnabled(activity)) {
             isSuccess(false)
-//                showToast(getString(R.string.enable_gps_msg))
+            return
+        }
+
+        if (isGmsAvailable()) {
+            getLocationViaFused(isSuccess)
+        } else {
+            getLocationViaLegacy(isSuccess)
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun requestNewLocationData(isSuccess: (Boolean) -> Unit) {
-        val locationRequest =
-            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 0L)
-                .setMinUpdateDistanceMeters(2f)
-        mFusedLocationClient =
-            LocationServices.getFusedLocationProviderClient(activity)
-        mFusedLocationClient.requestLocationUpdates(
-            locationRequest.build(),
-            locationCallback(isSuccess),
+    private fun getLocationViaFused(isSuccess: (Boolean) -> Unit) {
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(activity)
+
+        // 1. Try getCurrentLocation first (most accurate, works even without cached fix)
+        val cts = CancellationTokenSource()
+        fusedLocationClient!!.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+            .addOnSuccessListener { location ->
+                if (location != null) {
+                    ScannerActivity.location = LatLng(location.latitude, location.longitude)
+                    isSuccess(true)
+                    return@addOnSuccessListener
+                }
+                // 2. Fall back to lastLocation
+                tryLastLocationThenUpdates(isSuccess)
+            }
+            .addOnFailureListener {
+                // 3. Fall back to lastLocation on failure
+                tryLastLocationThenUpdates(isSuccess)
+            }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun tryLastLocationThenUpdates(isSuccess: (Boolean) -> Unit) {
+        fusedLocationClient?.lastLocation?.addOnCompleteListener(activity) { task ->
+            val location: Location? = task.result
+            if (location != null) {
+                ScannerActivity.location = LatLng(location.latitude, location.longitude)
+                isSuccess(true)
+            } else {
+                requestFusedLocationUpdates(isSuccess)
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestFusedLocationUpdates(isSuccess: (Boolean) -> Unit) {
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000L)
+            .setMaxUpdates(1)
+            .setWaitForAccurateLocation(false)
+            .build()
+
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc = result.lastLocation ?: result.locations.firstOrNull()
+                if (loc != null) {
+                    ScannerActivity.location = LatLng(loc.latitude, loc.longitude)
+                    isSuccess(true)
+                } else {
+                    isSuccess(false)
+                }
+                stopFusedUpdates()
+            }
+        }
+
+        fusedLocationClient?.requestLocationUpdates(
+            locationRequest,
+            locationCallback!!,
             Looper.getMainLooper()
         )
     }
 
-    private fun locationCallback(isSuccess: (Boolean) -> Unit) = object : LocationCallback() {
-        override fun onLocationResult(p0: LocationResult) {
-            if (p0.locations.isNotEmpty()) {
-                val latLng =
-                    LatLng(p0.locations[0].latitude, p0.locations[0].longitude)
-                ScannerActivity.location = latLng
-                saveLocationToFile(latLng,"getLastLocation")
-                isSuccess(true)
-            } else {
-                saveLocationToFile(null,"getLastLocation")
+    @SuppressLint("MissingPermission")
+    private fun getLocationViaLegacy(isSuccess: (Boolean) -> Unit) {
+        locationManager =
+            activity.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        val provider = when {
+            locationManager!!.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
+                LocationManager.GPS_PROVIDER
+            locationManager!!.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
+                LocationManager.NETWORK_PROVIDER
+            else -> {
                 isSuccess(false)
+                return
             }
         }
-    }
 
-    fun isLocationEnabled(activity: Activity): Boolean {
-        val locationManager: LocationManager =
-            activity.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(
-            LocationManager.NETWORK_PROVIDER
+        // Use cached last known location if fresh enough (< 2 minutes old)
+        val lastKnown = locationManager!!.getLastKnownLocation(provider)
+        if (lastKnown != null && System.currentTimeMillis() - lastKnown.time < 120_000L) {
+            ScannerActivity.location = LatLng(lastKnown.latitude, lastKnown.longitude)
+            isSuccess(true)
+            return
+        }
+
+        legacyLocationListener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                ScannerActivity.location = LatLng(location.latitude, location.longitude)
+                isSuccess(true)
+                stopLegacyUpdates()
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+            override fun onProviderEnabled(provider: String) = Unit
+            override fun onProviderDisabled(provider: String) = Unit
+        }
+
+        locationManager!!.requestLocationUpdates(
+            provider,
+            0L,
+            0f,
+            legacyLocationListener!!,
+            Looper.getMainLooper()
         )
     }
 
-    fun saveLocationToFile(latLng: LatLng?, functionName: String) {
-       /* val name = createFileName() + "-$functionName" + ".txt"
-        val fileDir =
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath + "/locations")
-        if (!fileDir.exists())
-            fileDir.mkdir()
-        val file = File(fileDir, name)
-
-        val streamWriter = OutputStreamWriter(activity.openFileOutput(name, Context.MODE_PRIVATE))
-        try {
-            if (latLng != null) {
-//                streamWriter.write("${latLng.latitude},${latLng.longitude}")
-                file.writeText("${latLng.latitude},${latLng.longitude}")
-            } else
-                file.writeText("LatLng is null")
-//                streamWriter.write("LatLng is null")
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } finally {
-            streamWriter.close()
-        }
-*/
+    fun stopUpdates() {
+        stopFusedUpdates()
+        stopLegacyUpdates()
     }
 
-    private fun createFileName(): String? {
-        val defaultFilePattern = "yyyy-MM-dd-HH-mm-ss"
-        val date = Date(System.currentTimeMillis())
-        val format = SimpleDateFormat(defaultFilePattern, Locale.ENGLISH)
-        return format.format(date)
+    private fun stopFusedUpdates() {
+        locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
+        locationCallback = null
+    }
+
+    private fun stopLegacyUpdates() {
+        legacyLocationListener?.let { locationManager?.removeUpdates(it) }
+        legacyLocationListener = null
+    }
+
+    fun isLocationEnabled(activity: Activity): Boolean {
+        val lm = activity.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    }
+
+    private fun isGmsAvailable(): Boolean {
+        return try {
+            val result = com.google.android.gms.common.GoogleApiAvailability
+                .getInstance()
+                .isGooglePlayServicesAvailable(activity)
+            result == com.google.android.gms.common.ConnectionResult.SUCCESS
+        } catch (_: Exception) {
+            false
+        }
     }
 }

@@ -238,7 +238,7 @@ class MainActivity : AppCompatActivity() {
         }
         var templateMessage = ""
         println(templateList?.size)
-        Toast.makeText(this, "Template size - ${templateList?.size}", Toast.LENGTH_SHORT).show()
+//        Toast.makeText(this, "Template size - ${templateList?.size}", Toast.LENGTH_SHORT).show()
         templateList?.forEach {
             templateMessage += "\n${it.path}"
         }
