@@ -142,42 +142,42 @@ internal class FingerprintHelper(
                 "WaxdPosLib",
                 "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
             )*/
-            //NBDevices.initialize(context.getApplicationContext());
             if (!NBDevices.isInitialized()) {
-                NBDevices.initialize(context)
-                Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing")
-                logDebug("FingerPrintService::Init -> NBDevices initializing")
-                for (i in 0..49) {
-                    Thread.sleep(500)
-                    Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing $i")
-                    logDebug("FingerPrintService::Init -> NBDevices initializing $i")
-                    if (NBDevices.isInitialized()) {
-                        Log.d(
-                            "WaxdPosLib",
-                            "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
-                        )
-                        logDebug(
-                            "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
-                        )
-                        break
-                    } else if (i == 49) {
-                        err = "Device initialization failed."
-                        Log.d(
-                            "WaxdPosLib",
-                            "FingerPrintService::Init -> No fingerprint reader found"
-                        )
-                        logDebug(
-                            "FingerPrintService::Init -> No fingerprint reader found"
-                        )
-                        isCountDownThroughTimer = true
-                        countDownTimer?.cancel()
-                        readerInfo = "No fingerprint reader"
-                        readerStatus = ReaderStatus.INIT_FAILED
-                        sessionHelper.onSessionChanges(readerStatus, err)
-                    }
 
+
+
+            }
+            NBDevices.initialize(context)
+            Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing")
+            logDebug("FingerPrintService::Init -> NBDevices initializing")
+            for (i in 0..49) {
+                Thread.sleep(500)
+                Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices initializing $i")
+                logDebug("FingerPrintService::Init -> NBDevices initializing $i")
+                if (NBDevices.isInitialized()) {
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
+                    )
+                    logDebug(
+                        "FingerPrintService::Init -> NBDevices.is-initialized - ${NBDevices.isInitialized()}"
+                    )
+                    break
+                } else if (i == 49) {
+                    err = "Device initialization failed."
+                    Log.d(
+                        "WaxdPosLib",
+                        "FingerPrintService::Init -> No fingerprint reader found"
+                    )
+                    logDebug(
+                        "FingerPrintService::Init -> No fingerprint reader found"
+                    )
+                    isCountDownThroughTimer = true
+                    countDownTimer?.cancel()
+                    readerInfo = "No fingerprint reader"
+                    readerStatus = ReaderStatus.INIT_FAILED
+                    sessionHelper.onSessionChanges(readerStatus, err)
                 }
-
 
             }
             Log.d("WaxdPosLib", "FingerPrintService::Init -> NBDevices.initialize... Done")
@@ -947,6 +947,15 @@ internal class FingerprintHelper(
             /*   identificationCompleteStatus[readerNo] = true
                if (identificationCompleteStatus.size >= 2)*/
                 fingerprintListener.identificationResult(result, readerNo)
+        }
+
+        override fun onSpoofDetected(readerNo: Int) {
+            fingerprintListener.onSpoofDetected(readerNo)
+            // Cancel the other reader so it stops its hardware scan immediately.
+            val otherNo = 1 - readerNo
+            reader[otherNo]?.cancelTap()
+            readerStatus = ReaderStatus.SPOOF_DETECTED
+            sessionHelper.onSessionChanges(ReaderStatus.SPOOF_DETECTED, "Spoof detected on reader $readerNo")
         }
     }
 

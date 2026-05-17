@@ -655,6 +655,14 @@ internal class ScannerActivity : AppCompatActivity() {
                 // Handle scanner read failures here.
             }
 
+            ReaderStatus.SPOOF_DETECTED -> {
+                clearLists()
+                setMessage("Initializing sensor, please wait...")
+                handleCancelButtonsVisibility(isVisible = true)
+                setStartButtonMessage("", isVisible = false)
+                fingerprintHelper?.scanAndExtract()
+            }
+
             ReaderStatus.FINGERS_DETECTED -> {
                 // Handle the case where fingers are detected but not yet read.
             }
@@ -682,6 +690,12 @@ internal class ScannerActivity : AppCompatActivity() {
 
             ReaderStatus.FINGERS_VERIFICATION_FAILED -> {
                 setFingerprintScanningResult(result = false)
+            }
+
+            ReaderStatus.SPOOF_DETECTED -> {
+                setMessage("Spoof detected. Please use a real finger and try again.")
+                handleCancelButtonsVisibility(isVisible = false)
+                setStartButtonMessage("Try Again", isVisible = true)
             }
 
             ReaderStatus.LOW_POWER_MODE -> {
@@ -832,6 +846,13 @@ internal class ScannerActivity : AppCompatActivity() {
                 ReaderStatus.LOW_FINGERS_QUALITY -> {}
                 ReaderStatus.FINGERS_VERIFICATION_SUCCESS -> {}
                 ReaderStatus.FINGERS_VERIFICATION_FAILED -> {}
+                ReaderStatus.SPOOF_DETECTED -> {
+                    setMessage("Spoof detected. Please use a real finger and try again.")
+                    runOnUiThread {
+                        handleCancelButtonsVisibility(isVisible = false)
+                        setStartButtonMessage("Try Again", isVisible = true)
+                    }
+                }
                 ReaderStatus.LOW_POWER_MODE -> {
                     resetImages()
                     sleepModeTrack++
@@ -1349,6 +1370,10 @@ internal class ScannerActivity : AppCompatActivity() {
                 setMessage("Fingerprint verified successfully.")
                 saveTransactionToDb()
             }
+        }
+
+        override fun onSpoofDetected(readerNo: Int) {
+            // sessionHelper already handles UI update via ReaderStatus.SPOOF_DETECTED
         }
     }
 

@@ -7,12 +7,10 @@ import android.os.Environment
 import android.os.Process
 import android.util.Base64
 import android.util.Log
-import com.google.zxing.BarcodeActivity
 import com.newrelic.agent.android.NewRelic
 import com.nextbiometrics.biometrics.NBBiometricsContext
 import com.nextbiometrics.biometrics.NBBiometricsExtractResult
 import com.nextbiometrics.biometrics.NBBiometricsFingerPosition
-import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsSecurityLevel
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -31,8 +29,6 @@ import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.devices.NBDeviceStopMode
 import com.nextbiometrics.system.NextBiometricsException
 import com.scanner.app.ScannerApp
-import com.scanner.utils.KeyStore.decryptData
-import com.scanner.utils.KeyStore.encryptData
 import com.scanner.utils.KeyStorePortable
 import com.scanner.utils.NewRelicWrapper.logCustom
 import com.scanner.utils.NewRelicWrapper.logDebug
@@ -41,10 +37,6 @@ import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
 import com.scanner.utils.helper.FingerprintListener
 import com.scanner.utils.helper.OnFileSavedListener
-import com.telpo.tps550.api.fingerprint.FingerPrint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
@@ -60,7 +52,6 @@ import java.text.SimpleDateFormat
 import java.util.AbstractMap
 import java.util.Date
 import java.util.Locale
-import kotlin.math.log
 
 
 internal class FingerprintReader(
@@ -1054,9 +1045,9 @@ internal class FingerprintReader(
 
         override fun preview(event: NBBiometricsScanPreviewEvent) {
             val image = event.image
-            spoofScore = event.spoofScoreValue
+            spoofScore = event.livenessScoreValue
             isValidSpoofScore = true
-            if (spoofScore <= MIN_ANTISPOOF_THRESHOLD || spoofScore > MAX_ANTISPOOF_THRESHOLD) {
+            if (spoofScore !in 1..MAX_ANTISPOOF_THRESHOLD) {
                 spoofScore = MIN_ANTISPOOF_THRESHOLD
                 isValidSpoofScore = false
             }
@@ -1181,7 +1172,7 @@ internal class FingerprintReader(
 //                    try {
                     timeStart = System.currentTimeMillis()
                     //Hide Menu before scan and extract starts.
-//                    if (isSpoofEnabled) enableSpoof()
+                    if (isSpoofEnabled) enableSpoof()
                     //Enable Image preview for FAP20
                     //device.setParameter(410,1);
                     extractResult = context.extract(
@@ -1198,6 +1189,9 @@ internal class FingerprintReader(
                     }
 
                     if (isSpoofEnabled && isValidSpoofScore && previewListener.getSpoofScore() <= tmpSpoofThreshold) {
+                        Log.e("WaxdPosLib", "FingerprintReader[$readerNo]::scanExtract -> Spoof detected (score=${previewListener.getSpoofScore()})")
+                        showMessage("Spoof detected. Please use a real finger.", isErrorMessage = true)
+                        fingerprintListener.onSpoofDetected(readerNo)
                         return false
                     }
                     showMessage("Extracted successfully!")
@@ -1396,8 +1390,11 @@ internal class FingerprintReader(
 //                        throw Exception("Not identified, reason: " + identifyResult.status)
                     }
                     if (isSpoofEnabled && isValidSpoofScore && previewListener.getSpoofScore() <= tmpSpoofThreshold) {
+                        Log.e("WaxdPosLib", "FingerprintReader[$readerNo]::scanExtract -> Spoof detected (score=${previewListener.getSpoofScore()})")
                         NewRelic.recordHandledException(Exception("Not identified, reason: $spoofCause"))
-                        throw Exception("Not identified, reason: $spoofCause")
+                        showMessage("Spoof detected. Please use a real finger.", isErrorMessage = true)
+                        fingerprintListener.onSpoofDetected(readerNo)
+                        return false
                     }
                     showMessage("Identified successfully with fingerprint: " + identifyResult.templateId)
                     showResultOnUiThread(

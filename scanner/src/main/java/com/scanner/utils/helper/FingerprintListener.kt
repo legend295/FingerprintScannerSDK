@@ -25,4 +25,6 @@ internal interface FingerprintListener {
 
     fun identificationStatus(status: NBBiometricsStatus?, readerNo: Int)
     fun identificationResult(result: NBBiometricsIdentifyResult?, readerNo: Int)
+
+    fun onSpoofDetected(readerNo: Int)
 }
