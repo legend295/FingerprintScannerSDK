@@ -383,7 +383,8 @@ internal class ScannerActivity : AppCompatActivity() {
         }
         locationTimeoutHandler.postDelayed(locationTimeoutRunnable!!, 30_000L)
 
-        locationWrapper.getLocation { _ ->
+        locationWrapper.getLocation { latLng ->
+            location = latLng
             if (settled) return@getLocation
             settle()
             init()
@@ -636,8 +637,7 @@ internal class ScannerActivity : AppCompatActivity() {
 
             // Handles the successful read of fingerprints or if the fingers were released from the reader.
             ReaderStatus.FINGERS_READ_SUCCESS, ReaderStatus.FINGERS_RELEASED -> {
-                if (list.isEmpty()) { // Check if the data list is unexpectedly empty.
-                    // Inform the user no data was found.
+                if (templateList.isEmpty()) {
                     handleMessage("Error", "Finger print not found.") {}
                     return
                 }
@@ -1031,7 +1031,8 @@ internal class ScannerActivity : AppCompatActivity() {
             }
 
             if (list.size == 2) {
-                locationWrapper.getLocation {
+                locationWrapper.getLocation { latLng ->
+                    location = latLng
                     Log.d(tag, "${location?.latitude}, ${location?.longitude}")
                 }
             }
@@ -1282,20 +1283,9 @@ internal class ScannerActivity : AppCompatActivity() {
                 NBBiometricsStatus.NONE -> {}
                 NBBiometricsStatus.OK -> {
                     if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
-                        // Store reader number here
+                        // Track which readers finished extraction; the "Done" button is
+                        // shown in onScanExtractCompleted() once files are actually saved.
                         areBothFingerprintScannedSuccessfully[readerNo] = true
-                        if (checkBothFingersSucceed()) {
-//                            uploadTemplates()
-                            isFingerprintScanningInProgress = false
-                            readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
-                            setStartButtonMessage("Done", true)
-                            handleCancelButtonsVisibility(isVisible = false)
-                            setMessage(getString(R.string.read_success))
-                            handleMessage(
-                                title = "Registration Successful",
-                                "Your account has been successfully created using the provided BVN and fingerprint details. You can now proceed with transactions and fingerprint verification."
-                            ) {}
-                        }
                     }
                 }
 
@@ -1488,8 +1478,23 @@ internal class ScannerActivity : AppCompatActivity() {
     }
 
     fun onScanExtractCompleted() {
-        runOnUiThread {
-            btnStart?.isEnabled = true
+        // Called after BOTH readers have finished saving all files. Safe to show "Done" here.
+        if (scanningOptions?.scanningType == ScanningType.REGISTRATION && checkBothFingersSucceed()) {
+            runOnUiThread {
+                isFingerprintScanningInProgress = false
+                readerStatus = ReaderStatus.FINGERS_READ_SUCCESS
+                setStartButtonMessage("Done", true)
+                handleCancelButtonsVisibility(isVisible = false)
+                setMessage(getString(R.string.read_success))
+                handleMessage(
+                    title = "Registration Successful",
+                    "Your account has been successfully created using the provided BVN and fingerprint details. You can now proceed with transactions and fingerprint verification."
+                ) {}
+            }
+        } else {
+            runOnUiThread {
+                btnStart?.isEnabled = true
+            }
         }
     }
 

@@ -18,6 +18,7 @@ import com.scanner.utils.enums.ScanningType
 import org.json.JSONObject
 import java.io.File
 import androidx.core.content.edit
+import com.scanner.updated.UpdatedFingerprintScanner
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
@@ -92,12 +93,13 @@ class MainActivity : AppCompatActivity() {
                 pendingBvn = null
 //                progressBar?.show()
                 val finalAmount = if (amount.isEmpty()) 100 else amount.toInt()
-                FingerprintScanner.Builder(this)
+//                FingerprintScanner.Builder(this)
+                UpdatedFingerprintScanner.Builder(this)
                     .setUniqueId(bvnNumber)
                     .setAmount(finalAmount)
                     .setScanningType(ScanningType.VERIFICATION)
                     .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
-                    .skipLocation(skipLocation = false)
+                    .skipLocation(skipLocation = true)
                     .setThemeOptions(themeOptions)
                     .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
                     .start(this, scanningLauncher)
@@ -135,7 +137,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRegistration(bvnNumber: String, phoneNumber: String) {
         pendingBvn = bvnNumber
-        FingerprintScanner.Builder(this)
+        UpdatedFingerprintScanner.Builder(this)
+//        FingerprintScanner.Builder(this)
             .setUniqueId(bvnNumber)
             .setPhoneNumber(phoneNumber)
             .setScanningType(ScanningType.REGISTRATION)
@@ -163,8 +166,8 @@ class MainActivity : AppCompatActivity() {
         /*val dir = File("${filesDir.path}/$bvn/")
         val datCount = dir.listFiles { f -> f.name.endsWith(".dat") }?.size ?: 0
         if (datCount >= 2) {*/
-            getSharedPreferences("scanner_prefs", MODE_PRIVATE)
-                .edit { putString("registered_bvn", bvn) }
+        getSharedPreferences("scanner_prefs", MODE_PRIVATE)
+            .edit { putString("registered_bvn", bvn) }
 //        }
     }
 

@@ -16,7 +16,6 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.android.gms.maps.model.LatLng
-import com.scanner.activity.ScannerActivity
 
 internal class LocationWrapper(private val activity: Activity) {
 
@@ -25,57 +24,62 @@ internal class LocationWrapper(private val activity: Activity) {
     private var legacyLocationListener: LocationListener? = null
     private var locationManager: LocationManager? = null
 
+    /**
+     * Requests the device's current location and delivers it via [onLocation].
+     *
+     * The callback receives the [LatLng] on success, or null if the location could not be
+     * determined (provider disabled, no cached fix, or a platform error). The caller is
+     * responsible for storing the value wherever it belongs — this class does not write to
+     * any shared state.
+     *
+     * @param onLocation  Invoked once with the location (or null) on the main thread.
+     */
     @SuppressLint("MissingPermission")
-    fun getLocation(isSuccess: (Boolean) -> Unit) {
+    fun getLocation(onLocation: (LatLng?) -> Unit) {
         if (!isLocationEnabled(activity)) {
-            isSuccess(false)
+            onLocation(null)
             return
         }
 
         if (isGmsAvailable()) {
-            getLocationViaFused(isSuccess)
+            getLocationViaFused(onLocation)
         } else {
-            getLocationViaLegacy(isSuccess)
+            getLocationViaLegacy(onLocation)
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun getLocationViaFused(isSuccess: (Boolean) -> Unit) {
+    private fun getLocationViaFused(onLocation: (LatLng?) -> Unit) {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(activity)
 
-        // 1. Try getCurrentLocation first (most accurate, works even without cached fix)
         val cts = CancellationTokenSource()
         fusedLocationClient!!.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
             .addOnSuccessListener { location ->
                 if (location != null) {
-                    ScannerActivity.location = LatLng(location.latitude, location.longitude)
-                    isSuccess(true)
+                    onLocation(LatLng(location.latitude, location.longitude))
                     return@addOnSuccessListener
                 }
-                // 2. Fall back to lastLocation
-                tryLastLocationThenUpdates(isSuccess)
+                tryLastLocationThenUpdates(onLocation)
             }
             .addOnFailureListener {
-                // 3. Fall back to lastLocation on failure
-                tryLastLocationThenUpdates(isSuccess)
+                tryLastLocationThenUpdates(onLocation)
             }
     }
 
     @SuppressLint("MissingPermission")
-    private fun tryLastLocationThenUpdates(isSuccess: (Boolean) -> Unit) {
+    private fun tryLastLocationThenUpdates(onLocation: (LatLng?) -> Unit) {
         fusedLocationClient?.lastLocation?.addOnCompleteListener(activity) { task ->
             val location: Location? = task.result
             if (location != null) {
-                ScannerActivity.location = LatLng(location.latitude, location.longitude)
-                isSuccess(true)
+                onLocation(LatLng(location.latitude, location.longitude))
             } else {
-                requestFusedLocationUpdates(isSuccess)
+                requestFusedLocationUpdates(onLocation)
             }
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun requestFusedLocationUpdates(isSuccess: (Boolean) -> Unit) {
+    private fun requestFusedLocationUpdates(onLocation: (LatLng?) -> Unit) {
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000L)
             .setMaxUpdates(1)
             .setWaitForAccurateLocation(false)
@@ -84,12 +88,7 @@ internal class LocationWrapper(private val activity: Activity) {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: result.locations.firstOrNull()
-                if (loc != null) {
-                    ScannerActivity.location = LatLng(loc.latitude, loc.longitude)
-                    isSuccess(true)
-                } else {
-                    isSuccess(false)
-                }
+                onLocation(loc?.let { LatLng(it.latitude, it.longitude) })
                 stopFusedUpdates()
             }
         }
@@ -102,7 +101,7 @@ internal class LocationWrapper(private val activity: Activity) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun getLocationViaLegacy(isSuccess: (Boolean) -> Unit) {
+    private fun getLocationViaLegacy(onLocation: (LatLng?) -> Unit) {
         locationManager =
             activity.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
@@ -112,23 +111,20 @@ internal class LocationWrapper(private val activity: Activity) {
             locationManager!!.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
                 LocationManager.NETWORK_PROVIDER
             else -> {
-                isSuccess(false)
+                onLocation(null)
                 return
             }
         }
 
-        // Use cached last known location if fresh enough (< 2 minutes old)
         val lastKnown = locationManager!!.getLastKnownLocation(provider)
         if (lastKnown != null && System.currentTimeMillis() - lastKnown.time < 120_000L) {
-            ScannerActivity.location = LatLng(lastKnown.latitude, lastKnown.longitude)
-            isSuccess(true)
+            onLocation(LatLng(lastKnown.latitude, lastKnown.longitude))
             return
         }
 
         legacyLocationListener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                ScannerActivity.location = LatLng(location.latitude, location.longitude)
-                isSuccess(true)
+                onLocation(LatLng(location.latitude, location.longitude))
                 stopLegacyUpdates()
             }
 

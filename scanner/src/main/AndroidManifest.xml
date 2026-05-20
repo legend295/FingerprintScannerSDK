@@ -18,6 +18,11 @@
             android:exported="false"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+        <activity
+            android:name="com.scanner.updated.UpdatedScannerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
         <!-- <receiver
              android:name="com.scanner.activity.ScannerActivity$BroadCastReceiverGPS"
              android:exported="false">

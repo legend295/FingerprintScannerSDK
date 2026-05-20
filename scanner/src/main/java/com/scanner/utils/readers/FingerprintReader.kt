@@ -1378,7 +1378,7 @@ internal class FingerprintReader(
                         scanFormatInfo,
                         previewListener,
                         templates.iterator(),
-                        NBBiometricsSecurityLevel.HIGH
+                        NBBiometricsSecurityLevel.NORMAL
                     )
                     timeStop = System.currentTimeMillis()
                     fingerprintListener.identificationResult(result = identifyResult, readerNo)
