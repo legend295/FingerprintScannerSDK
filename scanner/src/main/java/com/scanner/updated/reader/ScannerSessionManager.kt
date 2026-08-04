@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Manages the complete lifecycle of a dual-reader fingerprint session.
@@ -71,7 +72,8 @@ internal class ScannerSessionManager(
     // ── Low-power flag ────────────────────────────────────────────────────────
     // True when the hardware is sleeping, by either:
     //   (a) an explicit enableLowPowerMode() call from onDestroy, or
-    //   (b) a scan that failed with "Invalid operation" (device self-slept mid-scan).
+    //   (b) a ScannerEvent.DeviceInSleepMode event detected during a scan.
+    // "Invalid operation" ReaderErrors are regular SDK errors and do NOT set this flag.
     // Cleared when startScan() is called (device is being woken for a new attempt).
     // resetToReady() checks this flag and forces a full initialize() when true.
     // Exposed as read-only so UpdatedScannerActivity can read it without a separate flag.
@@ -114,10 +116,10 @@ internal class ScannerSessionManager(
 
     /**
      * Independent watchdog for [startScan]. Fires after [SCAN_WATCHDOG_TIMEOUT_MS] if the scan
-     * has not completed. When one reader throws (e.g. "Invalid operation") and the other reader's
-     * blocking SDK call doesn't respond to [FingerprintReaderWrapper.cancel], [activeJob] can be
-     * stuck inside [kotlinx.coroutines.coroutineScope] indefinitely. This watchdog runs on
-     * [managerScope] independently and forces [ScannerState.Failed] to unfreeze the UI.
+     * has not completed. When one reader throws and the other reader's blocking SDK call doesn't
+     * respond to [FingerprintReaderWrapper.cancel], [activeJob] can be stuck inside
+     * [kotlinx.coroutines.coroutineScope] indefinitely. This watchdog runs on [managerScope]
+     * independently and forces [ScannerState.Failed] to unfreeze the UI.
      */
     private var scanWatchdogJob: Job? = null
 
@@ -189,7 +191,7 @@ internal class ScannerSessionManager(
         // withTimeout alone cannot interrupt a blocked thread — it only delivers at suspension
         // points — so this sibling coroutine is the only reliable fallback.
         watchdogJob = managerScope.launch {
-            delay(INIT_TIMEOUT_MS)
+            delay(INIT_TIMEOUT_MS.milliseconds)
             if (_state.value is ScannerState.Initializing) {
                 logError("$tag initialize() → Watchdog timed out after ${INIT_TIMEOUT_MS / 1000}s")
                 _state.value = ScannerState.Failed("Fingerprint reader did not respond. Please retry.")
@@ -199,7 +201,7 @@ internal class ScannerSessionManager(
 
         activeJob = managerScope.launch {
             try {
-                withTimeout(INIT_TIMEOUT_MS) {
+                withTimeout(INIT_TIMEOUT_MS.milliseconds) {
                     performInitialization()
                 }
                 watchdogJob?.cancel()
@@ -235,29 +237,59 @@ internal class ScannerSessionManager(
      * Must be called from an IO coroutine. Throws on any unrecoverable failure.
      */
     private suspend fun performInitialization() = withContext(Dispatchers.IO) {
+        val overallStart = System.currentTimeMillis()
+        logTiming("performInitialization() ▶ start")
+
+        // Dispose stale SDK sessions before power-cycling. Without this, setDevice() below
+        // replaces the old NBDevice handles without calling dispose(), and the SDK's internal
+        // session tracking then returns "Invalid operation" on the next openSession() call.
+        // Must happen before USB power-OFF so dispose() can still communicate with the firmware.
+        reader0.close()
+        reader1.close()
+
+        // USB power OFF
+        var stepStart = System.currentTimeMillis()
         logDebug("$tag performInitialization() → USB power cycle")
+        logTiming("performInitialization() → usbPower(0) start")
         PowerControl(context).usbPower(0)
+        logTiming("performInitialization() → usbPower(0) done in ${elapsedSec(stepStart)}s")
+
         delay(1_000)
+
+        // USB power ON
+        stepStart = System.currentTimeMillis()
+        logTiming("performInitialization() → usbPower(1) start")
         PowerControl(context).usbPower(1)
+        logTiming("performInitialization() → usbPower(1) done in ${elapsedSec(stepStart)}s")
+
         delay(1_000)
 
         // Initialize the NBDevices SDK (idempotent if already initialized).
+        stepStart = System.currentTimeMillis()
+        logTiming("performInitialization() → NBDevices.initialize start")
         NBDevices.initialize(context)
+        logTiming("performInitialization() → NBDevices.initialize done in ${elapsedSec(stepStart)}s")
 
         // Poll until the SDK signals it is ready, up to 25 seconds.
+        stepStart = System.currentTimeMillis()
+        logTiming("performInitialization() → polling NBDevices.isInitialized start")
         val sdkReady = pollUntil(maxAttempts = 50, delayMs = 500) {
             NBDevices.isInitialized()
         }
+        logTiming("performInitialization() → NBDevices.isInitialized ready=$sdkReady in ${elapsedSec(stepStart)}s")
         if (!sdkReady) {
             throw IllegalStateException("NBDevices SDK did not initialize within the timeout.")
         }
 
         // Wait until at least two device handles are available.
         var devices = emptyArray<com.nextbiometrics.devices.NBDevice>()
+        stepStart = System.currentTimeMillis()
+        logTiming("performInitialization() → polling NBDevices.getDevices start")
         val devicesFound = pollUntil(maxAttempts = 50, delayMs = 500) {
             devices = NBDevices.getDevices()
             devices.size >= 2
         }
+        logTiming("performInitialization() → NBDevices.getDevices found=${devices.size} in ${elapsedSec(stepStart)}s")
         if (!devicesFound || devices.size < 2) {
             throw IllegalStateException("Expected 2 readers, found ${devices.size}.")
         }
@@ -270,18 +302,23 @@ internal class ScannerSessionManager(
         // Initialize both readers concurrently. Each init() has its own 30 s hard timeout via
         // a thread-pool Future.get(). Running them sequentially would risk the init watchdog
         // firing mid-way through the second reader even when both are just slow.
+        stepStart = System.currentTimeMillis()
+        logTiming("performInitialization() → reader0.init + reader1.init start")
         val (init0, init1) = coroutineScope {
             listOf(
                 async { reader0.init() },
                 async { reader1.init() },
             ).awaitAll()
         }
+        logTiming("performInitialization() → readers init done in ${elapsedSec(stepStart)}s (reader0=$init0, reader1=$init1)")
 
         if (!init0 || !init1) {
             throw IllegalStateException(
                 "Reader initialization failed — reader0=$init0, reader1=$init1"
             )
         }
+
+        logTiming("performInitialization() ■ TOTAL ${elapsedSec(overallStart)}s")
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -322,10 +359,10 @@ internal class ScannerSessionManager(
         cancelActiveJob()
         _state.value = ScannerState.Scanning
 
-        // earlyFailTrigger: completed immediately by collectReader when "Invalid operation" is
-        // detected (device entered sleep mode). The watchdog awaits it so it fires at once
-        // instead of waiting the full SCAN_WATCHDOG_TIMEOUT_MS. For all other errors, sibling
-        // cancel is used directly and the watchdog is cancelled before this trigger is ever set.
+        // earlyFailTrigger: completed immediately by collectReader when DeviceInSleepMode is
+        // detected. The watchdog awaits it so it fires at once instead of waiting the full
+        // SCAN_WATCHDOG_TIMEOUT_MS. For all other errors, sibling cancel is used directly and
+        // the watchdog is cancelled before this trigger is ever set.
         val earlyFailTrigger = CompletableDeferred<String>()
 
         // Watchdog: if a reader's blocking SDK call doesn't respond to cancelScan(), coroutineScope
@@ -339,7 +376,7 @@ internal class ScannerSessionManager(
                 logError("$tag startScan() → Watchdog fired: $reason")
                 reader0.cancel()
                 reader1.cancel()
-                if (reason.contains("Invalid operation", ignoreCase = true)) isLowPowerEnabled = true
+                if (reason.contains("sleep mode", ignoreCase = true)) isLowPowerEnabled = true
                 _state.value = ScannerState.Failed(reason)
                 activeJob?.cancel()
             }
@@ -375,10 +412,9 @@ internal class ScannerSessionManager(
                 reader1.cancel()
                 val reason = e.message ?: "Unknown scan error"
                 logError("$tag startScan() → Failed: $reason")
-                // "Invalid operation" means the device entered low-power sleep on its own.
-                // Set the flag so resetToReady() forces a full initialize() if the activity
-                // decides to reinit instead of retrying the scan.
-                if (reason.contains("Invalid operation", ignoreCase = true)) {
+                // DeviceInSleepMode is the only source of truth for low-power state.
+                // "Invalid operation" from ReaderError is a regular SDK error, not sleep mode.
+                if (reason.contains("sleep mode", ignoreCase = true)) {
                     isLowPowerEnabled = true
                 }
                 // Guard: scan watchdog may have already transitioned away from Scanning.
@@ -395,20 +431,18 @@ internal class ScannerSessionManager(
      * terminal [ScannerEvent.ScanCompleted] event.
      *
      * **Error handling strategy:**
-     * - **Spoof / non-sleep SDK error:** [sibling] is cancelled immediately so its blocking SDK
-     *   call gets a `cancelScan()` signal as early as possible, well before [coroutineScope]'s
-     *   cooperative cancellation would reach it.
-     * - **"Invalid operation" (device in sleep mode):** [sibling] is NOT cancelled. Calling
-     *   cancel when only one reader is awake creates mismatched hardware states (one Cancelled,
-     *   one Errored) that make the single unified UI status text confusing. Instead,
-     *   [earlyFailTrigger] is completed immediately, which causes the scan watchdog to fire
-     *   at once and set [ScannerState.Failed] — fast recovery without the state mismatch.
+     * - **Spoof / SDK error (including "Invalid operation"):** [sibling] is cancelled immediately
+     *   so its blocking SDK call gets a `cancelScan()` signal as early as possible, well before
+     *   [coroutineScope]'s cooperative cancellation would reach it.
+     * - **[ScannerEvent.DeviceInSleepMode]:** [sibling] is NOT cancelled. Cancelling when only one
+     *   reader is asleep creates mismatched hardware states. Instead, [earlyFailTrigger] is
+     *   completed immediately so the scan watchdog fires at once and sets [ScannerState.Failed].
      *
      * @param reader           The reader whose flow to collect.
-     * @param sibling          The other reader — cancelled immediately on non-sleep errors/spoof.
+     * @param sibling          The other reader — cancelled immediately on errors/spoof.
      * @param savePath         Directory path passed through to the reader.
-     * @param earlyFailTrigger Completed with the error message on "Invalid operation" to trigger
-     *                         the scan watchdog immediately rather than waiting its full timeout.
+     * @param earlyFailTrigger Completed with the error message on [ScannerEvent.DeviceInSleepMode]
+     *                         to trigger the scan watchdog immediately rather than waiting its full timeout.
      * @return                 The final [ReaderResult] for this reader.
      * @throws Exception when the reader reports an error or spoof.
      */
@@ -437,14 +471,14 @@ internal class ScannerSessionManager(
                     logError("$tag collectReader() → Spoof detected on reader ${event.readerNo}")
                     throw SpoofDetectedException("Spoof detected on reader ${event.readerNo}")
                 }
+                is ScannerEvent.DeviceInSleepMode -> {
+                    val msg = "Reader ${event.readerNo} is in sleep mode"
+                    earlyFailTrigger.complete(msg)
+                    logError("$tag collectReader() → $msg")
+                    throw IllegalStateException(msg)
+                }
                 is ScannerEvent.ReaderError -> {
-                    val isSleepMode = event.cause.message
-                        ?.contains("Invalid operation", ignoreCase = true) == true
-                    if (isSleepMode) {
-                        earlyFailTrigger.complete(event.cause.message ?: "Invalid operation")
-                    } else {
-                        sibling.cancel()
-                    }
+                    sibling.cancel()
                     logError("$tag collectReader() → Error on reader ${event.readerNo}: ${event.cause.message}")
                     throw event.cause
                 }
@@ -566,6 +600,18 @@ internal class ScannerSessionManager(
     // Private helpers
     // ──────────────────────────────────────────────────────────────────────────
 
+    /** Returns elapsed time from [startMs] formatted as seconds with 3 decimal places. */
+    private fun elapsedSec(startMs: Long): String =
+        "%.3f".format((System.currentTimeMillis() - startMs) / 1000.0)
+
+    /**
+     * Logs a timing message when [timingLogsEnabled] is true.
+     * Toggle [timingLogsEnabled] at runtime (or flip the companion default) to enable/disable.
+     */
+    private fun logTiming(msg: String) {
+        if (timingLogsEnabled) Log.d(tag, "[TIMING] $msg")
+    }
+
     /** Cancels [activeJob], [watchdogJob], and [scanWatchdogJob] if running and clears all references. */
     private fun cancelActiveJob() {
         scanWatchdogJob?.cancel()
@@ -609,5 +655,18 @@ internal class ScannerSessionManager(
         // 60 s gives even slow users (unusual grip, thick calluses) time to place their fingers.
         // 30 s was too aggressive and could fire on perfectly healthy hardware.
         private const val SCAN_WATCHDOG_TIMEOUT_MS = 60_000L
+
+        /**
+         * Set to `true` to print per-step timing logs for [performInitialization].
+         * Each log line is prefixed with `[TIMING]` and shows seconds with millisecond precision.
+         * Safe to toggle at runtime; change takes effect on the next [initialize] call.
+         *
+         * Example:
+         * ```kotlin
+         * ScannerSessionManager.timingLogsEnabled = true  // enable before init
+         * ScannerSessionManager.timingLogsEnabled = false // disable in production
+         * ```
+         */
+        var timingLogsEnabled = true
     }
 }

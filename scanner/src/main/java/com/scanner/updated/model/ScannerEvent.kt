@@ -106,6 +106,17 @@ sealed class ScannerEvent {
     data class SpoofDetected(val readerNo: Int) : ScannerEvent()
 
     /**
+     * The device is currently in low-power (sleep) mode and cannot accept scan commands.
+     * Emitted at the very start of a scan attempt, before any hardware interaction.
+     * [com.scanner.updated.reader.ScannerSessionManager] treats this the same as an
+     * "Invalid operation" sleep-mode error — it sets [isLowPowerEnabled] and surfaces
+     * [ScannerState.Failed] so the activity can trigger a full re-initialisation.
+     *
+     * @param readerNo  The reader that detected the sleep state.
+     */
+    data class DeviceInSleepMode(val readerNo: Int) : ScannerEvent()
+
+    /**
      * Unrecoverable error on this reader (hardware fault, SDK exception, or file I/O failure).
      * When emitted the flow terminates, and [com.scanner.updated.reader.ScannerSessionManager]
      * cancels the opposite reader.

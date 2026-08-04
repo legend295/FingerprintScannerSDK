@@ -59,6 +59,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Date
@@ -392,6 +393,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             is ScannerState.Failed -> {
                 dismissInitDialog()
                 if (sessionManager.isLowPowerEnabled) {
+                    // Only DeviceInSleepMode sets isLowPowerEnabled — always show sleep message.
                     sleepModeTrack++
                     resetFingerImages()
                     setMessage("Device is in sleep mode. Please touch both finger sensors to wake them up.")
@@ -399,7 +401,12 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                     setCancelButtonVisible(false)
                 } else {
                     sleepModeTrack = 0
-                    setMessage(state.reason)
+                    val displayMessage = if (state.reason.contains("Invalid operation", ignoreCase = true)) {
+                        "Invalid Operation"
+                    } else {
+                        state.reason
+                    }
+                    setMessage(displayMessage)
                     setStartButton("Retry", visible = true)
                     setCancelButtonVisible(false)
                 }
@@ -468,6 +475,11 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 appendMessage(event.text, event.isError)
             }
 
+            is ScannerEvent.DeviceInSleepMode -> {
+                logError("UpdatedScannerActivity :: Reader ${event.readerNo} is in sleep mode")
+                appendMessage("Reader ${event.readerNo + 1} is in sleep mode. Please reinitialise.", true)
+            }
+
             is ScannerEvent.SpoofDetected -> {
                 logError("UpdatedScannerActivity :: Spoof detected on reader ${event.readerNo}")
                 // UI is handled by renderState(ScannerState.Failed) which fires immediately after.
@@ -514,11 +526,16 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         // Readers are sleeping but sessions are still open.
                         // Retry the scan — the hardware wakes on finger contact or the first
                         // extract() call.  startScan() clears isLowPowerEnabled automatically.
+                        // Wait 2 seconds to give the device time to wake up before scanning.
                         setMessage("Initializing sensor, please wait…")
                         setCancelButtonVisible(true)
                         setStartButtonVisible(false)
-                        sessionManager.startScan(storagePath)
+                        lifecycleScope.launch {
+                            delay(2000)
+                            sessionManager.startScan(storagePath)
+                        }
                     }
+
                     sessionManager.isLowPowerEnabled -> {
                         // Too many consecutive sleep-mode failures (sleepModeTrack > 6).
                         // Bypass resetToReady() and force a full USB power-cycle + reinit,
@@ -527,6 +544,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         showInitDialog()
                         sessionManager.initialize()
                     }
+
                     else -> {
                         // Genuine hardware failure (not sleep mode).
                         // Use initializeHardware() so resetToReady() can skip the power cycle

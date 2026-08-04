@@ -4,13 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Environment
-import android.util.Base64
 import android.util.Log
 import com.newrelic.agent.android.NewRelic
 import com.nextbiometrics.biometrics.NBBiometricsContext
-import com.nextbiometrics.biometrics.NBBiometricsExtractResult
 import com.nextbiometrics.biometrics.NBBiometricsFingerPosition
-import com.nextbiometrics.biometrics.NBBiometricsIdentifyResult
 import com.nextbiometrics.biometrics.NBBiometricsSecurityLevel
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.biometrics.NBBiometricsTemplate
@@ -22,7 +19,6 @@ import com.nextbiometrics.devices.NBDeviceEncodeFormat
 import com.nextbiometrics.devices.NBDeviceFingerPosition
 import com.nextbiometrics.devices.NBDeviceImageQualityAlgorithm
 import com.nextbiometrics.devices.NBDeviceScanFormatInfo
-import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.system.NextBiometricsException
@@ -42,14 +38,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
-import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.IOException
-import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.IntBuffer
@@ -116,6 +106,9 @@ internal class FingerprintReaderWrapper(
 
     /** Returns the raw device state, or null if no device has been set. */
     fun getDeviceState(): NBDeviceState? = device?.state
+
+    /** Returns the device mode status, or null if no device has been set. */
+    fun getDeviceModeStatus(): Boolean? = device?.GetDeviceModeStatus()
 
     /** Returns true only when [init] completed successfully. */
     fun isReady(): Boolean = isInitialized && device?.isSessionOpen == true
@@ -234,6 +227,11 @@ internal class FingerprintReaderWrapper(
             return@callbackFlow
         }
 
+        if (device?.GetDeviceModeStatus() == true) {
+            trySend(ScannerEvent.DeviceInSleepMode(readerNo))
+            close(IllegalStateException("Reader $readerNo is in sleep mode"))
+            return@callbackFlow
+        }
         val templateDir = "${context.filesDir.path}/$bvnNumber/"
         var biometricsCtx: NBBiometricsContext? = null
         var wsqPath: String? = null
@@ -608,7 +606,7 @@ internal class FingerprintReaderWrapper(
         if (dev.isSessionOpen) return true
 
         // Key material — identical to the original implementation.
-        val cakId = "DefaultCAKKey1 ".toByteArray()
+        val cakId = "DefaultCAKKey1\u0000".toByteArray()
         val cak = byteArrayOf(
             0x05, 0x4B, 0x38, 0x3A, 0xCF.toByte(), 0x5B, 0xB8.toByte(), 0x01,
             0xDC.toByte(), 0xBB.toByte(), 0x85.toByte(), 0xB4.toByte(), 0x47, 0xFF.toByte(),
@@ -616,7 +614,7 @@ internal class FingerprintReaderWrapper(
             0x42, 0xC1.toByte(), 0xBF.toByte(), 0xF6.toByte(), 0xD1.toByte(), 0x66, 0x65,
             0x0A, 0x66, 0x34, 0x11,
         )
-        val cdkId = "Application Lock ".toByteArray()
+        val cdkId = "Application Lock\u0000".toByteArray()
         val cdk = byteArrayOf(
             0x6B, 0xC5.toByte(), 0x51, 0xD1.toByte(), 0x12, 0xF7.toByte(), 0xE3.toByte(), 0x42,
             0xBD.toByte(), 0xDC.toByte(), 0xFB.toByte(), 0x5D, 0x79, 0x4E, 0x5A, 0xD6.toByte(),
@@ -624,7 +622,7 @@ internal class FingerprintReaderWrapper(
             0x5E, 0x4C, 0x83.toByte(), 0x63, 0xFB.toByte(), 0xC2.toByte(), 0x3C, 0xF6.toByte(),
             0xAB.toByte(),
         )
-        val authKey1Id = "AUTH1 ".toByteArray()
+        val authKey1Id = "AUTH1\u0000".toByteArray()
         val authKey1 = byteArrayOf(
             0xDA.toByte(), 0x2E, 0x35, 0xB6.toByte(), 0xCB.toByte(), 0x96.toByte(), 0x2B,
             0x5F, 0x9F.toByte(), 0x34, 0x1F, 0xD1.toByte(), 0x47, 0x41, 0xA0.toByte(), 0x4D,
