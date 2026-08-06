@@ -3,8 +3,10 @@ package com.scanner.updated
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Dialog
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -60,8 +62,10 @@ import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.Date
 import kotlin.time.Duration.Companion.milliseconds
@@ -116,6 +120,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private var initDialog: Dialog? = null
     private var downloadDialog: Dialog? = null
     private var verificationResultDialog: Dialog? = null
+    private var readerNoResponseDialog: Dialog? = null
 
     // ── Configuration ─────────────────────────────────────────────────────────
     private var scanningOptions: BuilderOptions? = null
@@ -131,6 +136,39 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     // ── Location ──────────────────────────────────────────────────────────────
     private val locationHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var locationTimeoutRunnable: Runnable? = null
+
+    // ── Screen on/off tracking ────────────────────────────────────────────────
+    // The POS hardware drops the USB fingerprint reader sessions whenever the screen turns
+    // off, so a screen-off → screen-on cycle needs a full hardware re-init — the readers won't
+    // recover on their own the way they do from low-power sleep mode.
+    //
+    // The actual reinit (and its dialog) is NOT triggered directly from ACTION_SCREEN_ON:
+    // that broadcast fires the instant the display powers on, before the window manager has
+    // necessarily redrawn/refocused this activity's window. Showing a Dialog at that instant
+    // races the window attach and renders as a bare dim scrim with no content. Waiting for
+    // onWindowFocusChanged(true) instead guarantees the window is actually visible and safe
+    // to draw dialogs into.
+    private var screenTurnedOff = false
+    private var screenReceiverRegistered = false
+
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    logDebug("UpdatedScannerActivity :: screen off — USB reader sessions will drop")
+//                    screenTurnedOff = true
+//                    clearOnScreenOff()
+                    sessionManager.cancelScan()
+                    dismissInitDialog()
+                    cancelSession()
+                }
+
+                Intent.ACTION_SCREEN_ON -> {
+                    logDebug("UpdatedScannerActivity :: screen on — waiting for window focus before reinitializing")
+                }
+            }
+        }
+    }
 
     // ── UI state ──────────────────────────────────────────────────────────────
     private var currentUser: User? = null
@@ -177,8 +215,17 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     // ── Coroutine jobs ────────────────────────────────────────────────────────
     private var syncJob: Job? = null
 
+    /** Polls [ScannerSessionManager.areBothReadersAwake] while readers are asleep. */
+    private var sleepPollJob: Job? = null
+
     companion object {
         private const val DEFAULT_STORAGE_PATH = "biometrics/"
+
+        /** How often [startSleepModePolling] checks [ScannerSessionManager.areBothReadersAwake]. */
+        private const val SLEEP_POLL_INTERVAL_MS = 2000L
+
+        /** Total time [startSleepModePolling] waits for the readers to wake before prompting the user. */
+        private const val SLEEP_POLL_TIMEOUT_MS = 30_000L
 
         /** Last captured GPS coordinates for this scanning session. */
         var location: LatLng? = null
@@ -243,7 +290,20 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         }
 
         setupClickListeners()
+        registerScreenStateReceiver()
         startLocationThenInitialize()
+    }
+
+    /** Registers [screenStateReceiver] for the activity's full lifetime — see field comment. */
+    private fun registerScreenStateReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        // SCREEN_ON/OFF are system-only broadcasts — never sent by other apps — so
+        // RECEIVER_NOT_EXPORTED satisfies the API 33+ requirement without opening the receiver up.
+        ContextCompat.registerReceiver(this, screenStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        screenReceiverRegistered = true
     }
 
     override fun onResume() {
@@ -251,6 +311,10 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         // If the session was Ready/Scanning but a reader dropped, re-initialise.
         val current = sessionManager.state.value
         if (current is ScannerState.Ready || current is ScannerState.Scanning) {
+            if (!sessionManager.areBothReadersAwake()) {
+                handleFailedSleepMode(checkSessionAfterWake = true)
+                return
+            }
             if (!sessionManager.checkSessionHealth()) {
                 logDebug("UpdatedScannerActivity :: onResume → session unhealthy, reinitializing")
                 initializeHardware()
@@ -258,8 +322,33 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Fires whenever this window gains or loses focus — including after a screen-off/on cycle,
+     * since the display turning off strips window focus and turning it back on restores it once
+     * the window manager has actually redrawn the window. This is the safe point to reinitialise
+     * hardware and show the init dialog; see the [screenStateReceiver] field comment for why the
+     * raw ACTION_SCREEN_ON broadcast is too early to do that safely.
+     */
+  /*  override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && screenTurnedOff) {
+            screenTurnedOff = false
+            // Guard against a redundant reinit if onResume's own recovery check
+            // (areBothReadersAwake/checkSessionHealth) already kicked one off.
+            if (!isFinishing && sessionManager.state.value !is ScannerState.Initializing) {
+                logDebug("UpdatedScannerActivity :: window focus regained after screen on — reinitializing hardware")
+                initializeHardware()
+            }
+        }
+    }*/
+
     override fun onDestroy() {
         super.onDestroy()
+        if (screenReceiverRegistered) {
+            unregisterReceiver(screenStateReceiver)
+            screenReceiverRegistered = false
+        }
+        sleepPollJob?.cancel()
         locationTimeoutRunnable?.let { locationHandler.removeCallbacks(it) }
         locationWrapper.stopUpdates()
         // Put readers to sleep so they draw minimal current while the activity is gone.
@@ -359,12 +448,19 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             }
         }
 
-        btnCancel?.setOnClickListener {
-            btnCancel?.isEnabled = false
-            sessionManager.cancelScan("Cancelled by user")
-            setResult(RESULT_CANCELED)
-            finish()
-        }
+        btnCancel?.setOnClickListener { cancelSession() }
+    }
+
+    /**
+     * Cancels the current scan session and closes the activity with [RESULT_CANCELED].
+     * Shared by the Cancel button and the "No" choice on the reader-no-response dialog.
+     */
+    private fun cancelSession() {
+        sleepPollJob?.cancel()
+        btnCancel?.isEnabled = false
+        sessionManager.cancelScan("Cancelled by user")
+        setResult(RESULT_CANCELED)
+        finish()
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -379,6 +475,10 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      */
     private fun renderState(state: ScannerState) {
         logDebug("UpdatedScannerActivity :: renderState → $state")
+        // Any state change other than a fresh sleep-mode Failed supersedes an in-flight poll.
+        if (!(state is ScannerState.Failed && sessionManager.isLowPowerEnabled)) {
+            sleepPollJob?.cancel()
+        }
         when (state) {
             is ScannerState.Idle -> {
                 setMessage(getString(R.string.initializing))
@@ -417,10 +517,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 if (sessionManager.isLowPowerEnabled) {
                     // Only DeviceInSleepMode sets isLowPowerEnabled — always show sleep message.
                     sleepModeTrack++
-                    resetFingerImages()
-                    setMessage("Device is in sleep mode. Please touch both finger sensors to wake them up.")
-                    setStartButton("Start Scan", visible = true)
-                    setCancelButtonVisible(false)
+                    handleFailedSleepMode()
                 } else {
                     sleepModeTrack = 0
                     val displayMessage = if (state.reason.contains("Invalid operation", ignoreCase = true)) {
@@ -428,6 +525,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                     } else {
                         state.reason
                     }
+                    setReaderMessage(0, "")
+                    setReaderMessage(1, "")
                     setMessage(displayMessage)
                     setStartButton("Retry", visible = true)
                     setCancelButtonVisible(false)
@@ -440,6 +539,75 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 setStartButton("Start Scan", visible = true)
                 setCancelButtonVisible(false)
             }
+        }
+    }
+
+    /**
+     * @param checkSessionAfterWake  When true, [ScannerSessionManager.checkSessionHealth] is run
+     *   once the readers wake up, and the hardware is re-initialised if the session dropped while
+     *   asleep. Set from [onResume] only — the normal [renderState] sleep-mode path just waits for
+     *   the readers and shows the Start Scan button again.
+     */
+    private fun handleFailedSleepMode(checkSessionAfterWake: Boolean = false) {
+        resetFingerImages()
+        setMessage("Device is in sleep mode. Please touch both finger sensors to wake them up.")
+        setCancelButtonVisible(false)
+        startSleepModePolling(checkSessionAfterWake)
+    }
+
+    /**
+     * Polls [ScannerSessionManager.areBothReadersAwake] every 2 seconds for up to 30 seconds
+     * while the readers are asleep ([ScannerState.Failed] with `isLowPowerEnabled`).
+     *
+     * The Start Scan button stays hidden for the whole window. If the readers wake up within
+     * the window, the button is re-shown with an "awake" message. If they never respond, the
+     * user is asked via [showReaderNoResponseDialog] whether to keep waiting or end the session.
+     *
+     * @param checkSessionAfterWake  See [handleFailedSleepMode].
+     */
+    private fun startSleepModePolling(checkSessionAfterWake: Boolean = false) {
+        sleepPollJob?.cancel()
+        setStartButtonVisible(false)
+        sleepPollJob = lifecycleScope.launch {
+            var elapsedMs = 0L
+            while (elapsedMs < SLEEP_POLL_TIMEOUT_MS) {
+                delay(SLEEP_POLL_INTERVAL_MS.milliseconds)
+                elapsedMs += SLEEP_POLL_INTERVAL_MS
+                if (sessionManager.areBothReadersAwake()) {
+                    if (checkSessionAfterWake && !sessionManager.checkSessionHealth()) {
+                        logDebug("UpdatedScannerActivity :: onResume → readers awake but session unhealthy, reinitializing")
+                        initializeHardware()
+                        return@launch
+                    }
+                    setMessage("Readers are ready to scan.")
+                    setStartButton("Start Scan", visible = true)
+                    return@launch
+                }
+            }
+            showReaderNoResponseDialog(checkSessionAfterWake)
+        }
+    }
+
+    /**
+     * Shown when the readers fail to wake within [SLEEP_POLL_TIMEOUT_MS]. "Yes" restarts the
+     * 30-second wake check; "No" ends the session the same way the Cancel button does.
+     *
+     * @param checkSessionAfterWake  See [handleFailedSleepMode]; preserved across the restart.
+     */
+    private fun showReaderNoResponseDialog(checkSessionAfterWake: Boolean = false) {
+        runOnUiThread {
+            readerNoResponseDialog = AlertDialog.Builder(this)
+                .setMessage("There is no response from the readers. Do you want to continue this session")
+                .setCancelable(false)
+                .setPositiveButton("Yes") { dialog, _ ->
+                    dialog.dismiss()
+                    startSleepModePolling(checkSessionAfterWake)
+                }
+                .setNegativeButton("No") { dialog, _ ->
+                    dialog.dismiss()
+                    cancelSession()
+                }
+                .show()
         }
     }
 
@@ -546,7 +714,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             is ScannerState.Failed -> {
                 clearSessionData()
                 when {
-                    sessionManager.isLowPowerEnabled && sleepModeTrack <= 6 -> {
+                    sessionManager.isLowPowerEnabled && sleepModeTrack <= 3 -> {
                         // Readers are sleeping but sessions are still open.
                         // Retry the scan — the hardware wakes on finger contact or the first
                         // extract() call.  startScan() clears isLowPowerEnabled automatically.
@@ -555,6 +723,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         setCancelButtonVisible(true)
                         setStartButtonVisible(false)
                         lifecycleScope.launch {
+                            delay(2000.milliseconds)
                             delay(2000.milliseconds)
                             sessionManager.startScan(storagePath)
                         }
@@ -1156,6 +1325,34 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             tvStatusRight?.text = ""
             ivScannerLeft?.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_android_fingerprint_grey))
             ivScannerRight?.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_android_fingerprint_grey))
+        }
+    }
+
+    /**
+     * Stops any in-flight scan/init work and wipes session state the instant the screen turns
+     * off — the USB reader sessions are about to drop anyway, so there is nothing worth
+     * preserving. Skips [ScannerState.Success]/[ScannerState.Cancelled]: a result is either
+     * already being delivered to the caller or the session is already clear, and forcing a
+     * cancel there would stomp a registration result the user hasn't acknowledged yet.
+     */
+    private fun clearOnScreenOff() {
+        val current = sessionManager.state.value
+        if (current is ScannerState.Success || current is ScannerState.Cancelled) return
+
+        sleepPollJob?.cancel()
+        sessionManager.cancelScan("Screen turned off")
+        clearSessionData()
+        sleepModeTrack = 0
+        dismissInitDialog()
+        hideDownloadDialog()
+        runOnUiThread { runCatching { readerNoResponseDialog?.dismiss() } }
+        readerNoResponseDialog = null
+        resetFingerImages()
+        setReaderMessage(0, "")
+        setReaderMessage(1, "")
+        runOnUiThread {
+            messagesHolder?.removeAllViews()
+            lastMessageView = null
         }
     }
 

@@ -255,7 +255,7 @@ internal class ScannerSessionManager(
         PowerControl(context).usbPower(0)
         logTiming("performInitialization() → usbPower(0) done in ${elapsedSec(stepStart)}s")
 
-        delay(1000.milliseconds)
+        delay(2000.milliseconds)
 
         // USB power ON
         stepStart = System.currentTimeMillis()
@@ -263,7 +263,7 @@ internal class ScannerSessionManager(
         PowerControl(context).usbPower(1)
         logTiming("performInitialization() → usbPower(1) done in ${elapsedSec(stepStart)}s")
 
-        delay(1000.milliseconds)
+        delay(2000.milliseconds)
 
         // Initialize the NBDevices SDK (idempotent if already initialized).
         stepStart = System.currentTimeMillis()
@@ -286,7 +286,7 @@ internal class ScannerSessionManager(
         var devices = emptyArray<NBDevice>()
         stepStart = System.currentTimeMillis()
         logTiming("performInitialization() → polling NBDevices.getDevices start")
-        val devicesFound = pollUntil(maxAttempts = 50, delayMs = 500) {
+        val devicesFound = pollUntil(maxAttempts = 50, delayMs = 1000) {
             devices = NBDevices.getDevices()
             devices.size >= 2
         }
@@ -516,6 +516,15 @@ internal class ScannerSessionManager(
         }
         return true
     }
+
+    /**
+     * Returns true once both readers have woken from low-power sleep mode.
+     *
+     * Poll this after [enableLowPowerMode] to detect when the hardware has come back
+     * so the UI can re-show the Start Scan button.
+     */
+    fun areBothReadersAwake(): Boolean =
+        reader0.getDeviceModeStatus() == false && reader1.getDeviceModeStatus() == false
 
     /**
      * Immediately sets the state to [ScannerState.Ready] without any hardware check.
