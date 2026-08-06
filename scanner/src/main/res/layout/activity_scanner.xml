@@ -61,6 +61,21 @@
             app:layout_constraintTop_toBottomOf="@id/ivScannerLeft"
             tools:text="100%" />
 
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/tvStatusLeft"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:gravity="center"
+            android:textColor="@color/robinEggBlue"
+            android:textSize="13sp"
+            app:layout_constraintEnd_toEndOf="@id/ivScannerLeft"
+            app:layout_constraintStart_toStartOf="@id/ivScannerLeft"
+            app:layout_constraintTop_toBottomOf="@id/tvLeftQuality"
+            tools:text="Place your finger on the sensor." />
+
         <androidx.appcompat.widget.AppCompatImageView
             android:id="@+id/ivScannerRight"
             android:layout_width="wrap_content"
@@ -82,6 +97,21 @@
             app:layout_constraintStart_toStartOf="@id/ivScannerRight"
             app:layout_constraintTop_toBottomOf="@id/ivScannerRight"
             tools:text="100%" />
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/tvStatusRight"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:gravity="center"
+            android:textColor="@color/robinEggBlue"
+            android:textSize="13sp"
+            app:layout_constraintEnd_toEndOf="@id/ivScannerRight"
+            app:layout_constraintStart_toStartOf="@id/ivScannerRight"
+            app:layout_constraintTop_toBottomOf="@id/tvRightQuality"
+            tools:text="Please lift your finger." />
 
 
         <androidx.appcompat.widget.AppCompatTextView
@@ -159,7 +189,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             app:barrierDirection="bottom"
-            app:constraint_referenced_ids="ivScannerLeft,tvLeftQuality,ivScannerRight,tvRightQuality" />
+            app:constraint_referenced_ids="tvStatusLeft,tvStatusRight" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 </androidx.core.widget.NestedScrollView>

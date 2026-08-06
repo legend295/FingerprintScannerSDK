@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.common.apiutil.powercontrol.PowerControl
 import com.newrelic.agent.android.NewRelic
+import com.nextbiometrics.devices.NBDevice
 import com.nextbiometrics.devices.NBDevices
 import com.scanner.updated.model.ReaderResult
 import com.scanner.updated.model.ScannerEvent
@@ -103,13 +104,13 @@ internal class ScannerSessionManager(
      */
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Handle to the currently running init or scan job — cancelled on [release] or restart. */
+    /** Handle to the currently running init or scan job — canceled on [release] or restart. */
     private var activeJob: Job? = null
 
     /**
      * Independent watchdog for [initialize]. Launched on [managerScope] as a sibling (not a child)
      * of [activeJob], so it fires even when [activeJob] is blocked inside a non-suspending SDK
-     * call like [NBDevices.initialize] or [PowerControl.usbPower]. Cancelled as soon as the init
+     * call like [NBDevices.initialize] or [PowerControl.usbPower]. Canceled as soon as the init
      * job resolves normally.
      */
     private var watchdogJob: Job? = null
@@ -145,7 +146,7 @@ internal class ScannerSessionManager(
      * Must be called before [initialize] and before every [startScan] if parameters change.
      *
      * @param scanningType         Whether to run a registration or verification scan.
-     * @param bvnNumber            Unique user identifier; used as the template sub-directory.
+     * @param bvnNumber            Unique user identifier; used as the template subdirectory.
      * @param encryptionKey        App-level key used by [com.scanner.utils.KeyStorePortable].
      * @param skipFirebaseActions  When true, templates are stored in plaintext (dev/offline mode).
      * @param enableBmpExport      When true, a BMP copy is written alongside each JPEG preview.
@@ -169,7 +170,7 @@ internal class ScannerSessionManager(
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * Starts hardware initialisation asynchronously.
+     * Starts hardware initialization asynchronously.
      *
      * Steps:
      * 1. USB power cycle (off → 1 s delay → on → 1 s delay).
@@ -210,7 +211,7 @@ internal class ScannerSessionManager(
                     _state.value = ScannerState.Ready
                     logDebug("$tag initialize() → Ready")
                 }
-            } catch (e: TimeoutCancellationException) {
+            } catch (_: TimeoutCancellationException) {
                 watchdogJob?.cancel()
                 logError("$tag initialize() → Timed out after ${INIT_TIMEOUT_MS / 1000}s")
                 if (_state.value is ScannerState.Initializing) {
@@ -254,7 +255,7 @@ internal class ScannerSessionManager(
         PowerControl(context).usbPower(0)
         logTiming("performInitialization() → usbPower(0) done in ${elapsedSec(stepStart)}s")
 
-        delay(1_000)
+        delay(1000.milliseconds)
 
         // USB power ON
         stepStart = System.currentTimeMillis()
@@ -262,7 +263,7 @@ internal class ScannerSessionManager(
         PowerControl(context).usbPower(1)
         logTiming("performInitialization() → usbPower(1) done in ${elapsedSec(stepStart)}s")
 
-        delay(1_000)
+        delay(1000.milliseconds)
 
         // Initialize the NBDevices SDK (idempotent if already initialized).
         stepStart = System.currentTimeMillis()
@@ -282,7 +283,7 @@ internal class ScannerSessionManager(
         }
 
         // Wait until at least two device handles are available.
-        var devices = emptyArray<com.nextbiometrics.devices.NBDevice>()
+        var devices = emptyArray<NBDevice>()
         stepStart = System.currentTimeMillis()
         logTiming("performInitialization() → polling NBDevices.getDevices start")
         val devicesFound = pollUntil(maxAttempts = 50, delayMs = 500) {
@@ -334,14 +335,14 @@ internal class ScannerSessionManager(
      * - emits a [ScannerEvent.ReaderError] event, or
      * - throws any exception,
      *
-     * the [coroutineScope] immediately cancels the other reader's coroutine. The cancelled
+     * the [coroutineScope] immediately cancels the other reader's coroutine. The canceled
      * reader's [FingerprintReaderWrapper.runBlockingSdk] invokes `invokeOnCancellation →
      * device.cancelScan()` to unblock the blocking SDK call.
      *
      * Transitions to [ScannerState.Scanning] immediately. On completion:
      * - [ScannerState.Success] — both readers finished without error.
      * - [ScannerState.Failed] — one or both readers encountered a non-recoverable error.
-     * - [ScannerState.Cancelled] — the user or a spoof-detection cancelled the operation.
+     * - [ScannerState.Cancelled] — the user or a spoof-detection canceled the operation.
      *
      * Calling [startScan] before the manager is in [ScannerState.Ready] is a no-op with a log.
      *
@@ -362,7 +363,7 @@ internal class ScannerSessionManager(
         // earlyFailTrigger: completed immediately by collectReader when DeviceInSleepMode is
         // detected. The watchdog awaits it so it fires at once instead of waiting the full
         // SCAN_WATCHDOG_TIMEOUT_MS. For all other errors, sibling cancel is used directly and
-        // the watchdog is cancelled before this trigger is ever set.
+        // the watchdog is canceled before this trigger is ever set.
         val earlyFailTrigger = CompletableDeferred<String>()
 
         // Watchdog: if a reader's blocking SDK call doesn't respond to cancelScan(), coroutineScope
@@ -370,7 +371,7 @@ internal class ScannerSessionManager(
         // of activeJob to unfreeze the UI. It fires immediately when earlyFailTrigger is
         // completed (sleep-mode path) or after SCAN_WATCHDOG_TIMEOUT_MS (full-stuck path).
         scanWatchdogJob = managerScope.launch {
-            val reason = withTimeoutOrNull(SCAN_WATCHDOG_TIMEOUT_MS) { earlyFailTrigger.await() }
+            val reason = withTimeoutOrNull(SCAN_WATCHDOG_TIMEOUT_MS.milliseconds) { earlyFailTrigger.await() }
                 ?: "Scan did not complete. Please retry."
             if (_state.value is ScannerState.Scanning) {
                 logError("$tag startScan() → Watchdog fired: $reason")
@@ -431,15 +432,15 @@ internal class ScannerSessionManager(
      * terminal [ScannerEvent.ScanCompleted] event.
      *
      * **Error handling strategy:**
-     * - **Spoof / SDK error (including "Invalid operation"):** [sibling] is cancelled immediately
+     * - **Spoof / SDK error (including "Invalid operation"):** [sibling] is canceled immediately
      *   so its blocking SDK call gets a `cancelScan()` signal as early as possible, well before
      *   [coroutineScope]'s cooperative cancellation would reach it.
-     * - **[ScannerEvent.DeviceInSleepMode]:** [sibling] is NOT cancelled. Cancelling when only one
+     * - **[ScannerEvent.DeviceInSleepMode]:** [sibling] is NOT canceled. Cancelling when only one
      *   reader is asleep creates mismatched hardware states. Instead, [earlyFailTrigger] is
      *   completed immediately so the scan watchdog fires at once and sets [ScannerState.Failed].
      *
      * @param reader           The reader whose flow to collect.
-     * @param sibling          The other reader — cancelled immediately on errors/spoof.
+     * @param sibling          The other reader — canceled immediately on errors/spoof.
      * @param savePath         Directory path passed through to the reader.
      * @param earlyFailTrigger Completed with the error message on [ScannerEvent.DeviceInSleepMode]
      *                         to trigger the scan watchdog immediately rather than waiting its full timeout.
@@ -471,21 +472,26 @@ internal class ScannerSessionManager(
                     logError("$tag collectReader() → Spoof detected on reader ${event.readerNo}")
                     throw SpoofDetectedException("Spoof detected on reader ${event.readerNo}")
                 }
+
                 is ScannerEvent.DeviceInSleepMode -> {
                     val msg = "Reader ${event.readerNo} is in sleep mode"
                     earlyFailTrigger.complete(msg)
                     logError("$tag collectReader() → $msg")
                     throw IllegalStateException(msg)
                 }
+
                 is ScannerEvent.ReaderError -> {
                     sibling.cancel()
                     logError("$tag collectReader() → Error on reader ${event.readerNo}: ${event.cause.message}")
                     throw event.cause
                 }
+
                 is ScannerEvent.ScanCompleted -> {
                     result = event.result
                 }
-                else -> { /* Other events already forwarded; no special handling needed. */ }
+
+                else -> { /* Other events already forwarded; no special handling needed. */
+                }
             }
         }
 
@@ -516,8 +522,8 @@ internal class ScannerSessionManager(
      *
      * Use this in [android.app.Activity.onCreate] right after reusing the singleton, before
      * the state-flow observer is registered, so the first collected emission is always
-     * Ready ("Start Scan") and never a stale Success/Failed/Cancelled from the previous session.
-     * Hardware correctness is verified separately by [resetToReady] in [initializeHardware].
+     * Ready ("Start Scan") and never a stale Success/Failed/Canceled from the previous session.
+     * Hardware correctness is verified separately by [resetToReady] in [com.scanner.updated.UpdatedScannerActivity.initializeHardware].
      */
     fun clearStaleState() {
         _state.value = ScannerState.Ready
@@ -531,7 +537,7 @@ internal class ScannerSessionManager(
      * sleeping ([enableLowPowerMode] was called), returns `false` so the caller runs a full
      * [initialize] to properly wake the hardware.
      *
-     * @return true if readers are healthy and ready; false if full initialisation is needed.
+     * @return true if readers are healthy and ready; false if full initialization is needed.
      */
     fun resetToReady(): Boolean {
         // After enableLowPowerMode() the SDK session usually remains open — the device is
@@ -634,7 +640,7 @@ internal class ScannerSessionManager(
     ): Boolean {
         repeat(maxAttempts) {
             if (condition()) return true
-            delay(delayMs)
+            delay(delayMs.milliseconds)
         }
         return condition()
     }
@@ -658,7 +664,7 @@ internal class ScannerSessionManager(
 
         /**
          * Set to `true` to print per-step timing logs for [performInitialization].
-         * Each log line is prefixed with `[TIMING]` and shows seconds with millisecond precision.
+         * Each log line is prefixed with `TIMING` and shows seconds with millisecond precision.
          * Safe to toggle at runtime; change takes effect on the next [initialize] call.
          *
          * Example:

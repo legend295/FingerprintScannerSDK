@@ -20,7 +20,6 @@ import com.nextbiometrics.devices.NBDeviceFingerPosition
 import com.nextbiometrics.devices.NBDeviceImageQualityAlgorithm
 import com.nextbiometrics.devices.NBDeviceScanFormatInfo
 import com.nextbiometrics.devices.NBDeviceSecurityModel
-import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.system.NextBiometricsException
 import com.scanner.app.ScannerApp
 import com.scanner.updated.model.ReaderResult
@@ -47,6 +46,9 @@ import java.text.SimpleDateFormat
 import java.util.AbstractMap
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -104,9 +106,6 @@ internal class FingerprintReaderWrapper(
         device = nbDevice
     }
 
-    /** Returns the raw device state, or null if no device has been set. */
-    fun getDeviceState(): NBDeviceState? = device?.state
-
     /** Returns the device mode status, or null if no device has been set. */
     fun getDeviceModeStatus(): Boolean? = device?.GetDeviceModeStatus()
 
@@ -131,11 +130,11 @@ internal class FingerprintReaderWrapper(
     fun init(): Boolean {
         Log.d(tag, "init() starting…")
         isInitialized = false
-        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val executor = Executors.newSingleThreadExecutor()
         return try {
             val future = executor.submit<Boolean>(::doInit)
-            future.get(30, java.util.concurrent.TimeUnit.SECONDS)
-        } catch (e: java.util.concurrent.TimeoutException) {
+            future.get(30, TimeUnit.SECONDS)
+        } catch (_: TimeoutException) {
             logError("$tag init() → timed out after 30 s — device unresponsive")
             false
         } catch (e: Exception) {
@@ -194,7 +193,7 @@ internal class FingerprintReaderWrapper(
      *
      * The returned [Flow] should be collected on a coroutine that is a child of a shared
      * [kotlinx.coroutines.coroutineScope]. This ensures that if the collecting coroutine is
-     * cancelled (e.g. because the other reader failed), [cancel] is called automatically via
+     * canceled (e.g. because the other reader failed), [cancel] is called automatically via
      * [suspendCancellableCoroutine]'s `invokeOnCancellation` handler, unblocking the SDK call.
      *
      * The flow emits in this order on success:
@@ -208,7 +207,7 @@ internal class FingerprintReaderWrapper(
      *
      * @param savePath          Directory path (with trailing `/`) for WSQ and JPEG image files.
      * @param scanningType      Whether to run registration or verification logic.
-     * @param bvnNumber         Unique user identifier; used as the sub-directory for template files.
+     * @param bvnNumber         Unique user identifier; used as the subdirectory for template files.
      * @param encryptionKey     Application-level encryption key for template files.
      * @param skipFirebaseActions  When true the template is written but not checked against cloud state.
      * @param enableBmpExport   When true a BMP file is also written alongside the JPEG preview.
@@ -234,9 +233,9 @@ internal class FingerprintReaderWrapper(
         }
         val templateDir = "${context.filesDir.path}/$bvnNumber/"
         var biometricsCtx: NBBiometricsContext? = null
-        var wsqPath: String? = null
+        var wsqPath: String?
         var bitmapPath: String? = null
-        var templatePath: String? = null
+        var templatePath: String?
         var quality = 0
 
         // Tracks whether this producer exited via CancellationException so the finally block
@@ -247,7 +246,7 @@ internal class FingerprintReaderWrapper(
             biometricsCtx = NBBiometricsContext(device)
             // Capture a stable val so lambdas below can reference a non-nullable, non-reassignable
             // reference. Kotlin cannot smart-cast a var that is captured by a changing closure.
-            val ctx = biometricsCtx!!
+            val ctx = biometricsCtx
 
             when (scanningType) {
 
@@ -263,7 +262,7 @@ internal class FingerprintReaderWrapper(
                         trySend(event)
                     }
 
-                    // Block the IO thread; cancelled via invokeOnCancellation → cancelScan().
+                    // Block the IO thread, canceled via invokeOnCancellation → cancelScan().
                     val extractResult = runBlockingSdk {
                         ctx.extract(
                             NBBiometricsTemplateType.ISO,
@@ -314,7 +313,7 @@ internal class FingerprintReaderWrapper(
                         NBDeviceFingerPosition.Unknown,
                         0,
                     )
-                    wsqPath = saveRawFile(wsqBytes, "wsq", savePath, timestamp)
+                    wsqPath = saveRawFile(wsqBytes, dir = savePath, timestamp = timestamp)
                     wsqPath?.let { send(ScannerEvent.FileSaved(readerNo, it, ScannerEvent.FileSaved.FileType.WSQ)) }
 
                     // Save JPEG preview bitmap.
@@ -399,7 +398,7 @@ internal class FingerprintReaderWrapper(
                     ctx.dispose()
                     biometricsCtx = NBBiometricsContext(device)
                     // Capture a new stable val after the re-assignment for the lambda below.
-                    val verifyCtx = biometricsCtx!!
+                    val verifyCtx = biometricsCtx
                     Log.d(tag, "Starting identify with ${templates.size} stored templates…")
                     val identifyResult = runBlockingSdk {
                         verifyCtx.identify(
@@ -413,7 +412,10 @@ internal class FingerprintReaderWrapper(
                     }
 
                     ensureActive()
-                    Log.d(tag, "identify result: status=${identifyResult.status}, templateId=${identifyResult.templateId}, score=${identifyResult.score}")
+                    Log.d(
+                        tag,
+                        "identify result: status=${identifyResult.status}, templateId=${identifyResult.templateId}, score=${identifyResult.score}"
+                    )
                     send(ScannerEvent.IdentificationDone(readerNo, identifyResult))
 
                     if (isSpoofEnabled && isValidSpoofScore && spoofScore <= DEFAULT_ANTISPOOF_THRESHOLD) {
@@ -422,11 +424,11 @@ internal class FingerprintReaderWrapper(
                         return@callbackFlow
                     }
 
-                    val statusMsg = when {
-                        identifyResult.status == NBBiometricsStatus.OK ->
+                    val statusMsg = when (identifyResult.status) {
+                        NBBiometricsStatus.OK ->
                             "Fingerprint verified (template: ${identifyResult.templateId})."
 
-                        identifyResult.status == NBBiometricsStatus.MATCH_NOT_FOUND ->
+                        NBBiometricsStatus.MATCH_NOT_FOUND ->
                             "No matching fingerprint found."
 
                         else -> "Identification status: ${identifyResult.status}"
@@ -519,7 +521,7 @@ internal class FingerprintReaderWrapper(
         try {
             runCatching { ctx.cancelOperation() }
             dev.lowPowerMode()
-        } catch (e: NextBiometricsException) {
+        } catch (_: NextBiometricsException) {
             logDebug("$tag enableLowPowerMode() → OK")
         } catch (e: Exception) {
             logError("$tag enableLowPowerMode() → ${e.message}")
@@ -534,7 +536,7 @@ internal class FingerprintReaderWrapper(
 
     /**
      * Runs a blocking SDK call inside a [suspendCancellableCoroutine] so that when the parent
-     * coroutine is cancelled, [cancel] is invoked (via `invokeOnCancellation`) to unblock the SDK.
+     * coroutine is canceled, [cancel] is invoked (via `invokeOnCancellation`) to unblock the SDK.
      *
      * The SDK call must already be on the IO dispatcher (caller is responsible for `flowOn`).
      *
@@ -544,7 +546,7 @@ internal class FingerprintReaderWrapper(
     private suspend fun <T> runBlockingSdk(block: () -> T): T =
         suspendCancellableCoroutine { cont ->
             cont.invokeOnCancellation {
-                // Called from a different thread when the coroutine is cancelled.
+                // Called from a different thread when the coroutine is canceled.
                 runCatching { device?.cancelScan() }
             }
             try {
@@ -707,7 +709,7 @@ internal class FingerprintReaderWrapper(
      * Loads all encrypted ISO-template files from [templateDir], decrypts them, and returns
      * a list of entries suitable for passing to the SDK's identify() call.
      *
-     * @param ctx          NBBiometricsContext used to deserialise raw template bytes.
+     * @param ctx          NBBiometricsContext used to deserialize raw template bytes.
      * @param templateDir  Absolute path of the directory containing .dat template files.
      * @return             A list of key-value pairs (label → template) for the identify() call.
      */
@@ -738,10 +740,10 @@ internal class FingerprintReaderWrapper(
     }
 
     /**
-     * Serialises, optionally encrypts, and writes an ISO biometric template to disk.
+     * Serializes, optionally encrypts, and writes an ISO biometric template to disk.
      *
      * When [skipFirebaseActions] is true the template is written in plain binary (useful for
-     * offline / developer mode). Otherwise the bytes are AES-encrypted with [KeyStorePortable].
+     * offline / developer mode). Otherwise, the bytes are AES-encrypted with [KeyStorePortable].
      *
      * The saved filename follows the pattern:
      * `<timestamp><readerNo>-ISO-Template.dat`
@@ -791,7 +793,7 @@ internal class FingerprintReaderWrapper(
      * @param timestamp  Millisecond timestamp used to form a unique filename.
      * @return           Absolute path of the saved file, or null on failure.
      */
-    private fun saveRawFile(data: ByteArray?, extension: String, dir: String, timestamp: Long): String? {
+    private fun saveRawFile(data: ByteArray?, extension: String = "wsq", dir: String, timestamp: Long): String? {
         if (data == null) return null
         return try {
             File(dir).mkdirs()
@@ -833,7 +835,7 @@ internal class FingerprintReaderWrapper(
 
     /**
      * Encodes a raw grayscale image as an 8-bit BMP file (bottom-up, with a 256-entry
-     * grayscale colour table) and writes it to [dir].
+     * grayscale color table) and writes it to [dir].
      *
      * BMP format chosen for maximum compatibility with third-party AFIS tools.
      *
@@ -855,12 +857,12 @@ internal class FingerprintReaderWrapper(
         buf.putShort(0); buf.putShort(0)  // reserved
         buf.putInt(1078)                   // pixel data offset = 14 + 40 + 1024
 
-        // DIB header – BITMAPINFOHEADER (40 bytes)
+        // DIB header – BITMAP INFO HEADER (40 bytes)
         buf.putInt(40); buf.putInt(w); buf.putInt(h)
         buf.putShort(1); buf.putShort(8)   // planes=1, bpp=8
         buf.putInt(0); buf.putInt(pixelDataSize)
         buf.putInt(0); buf.putInt(0)       // X/Y pixels per metre
-        buf.putInt(256); buf.putInt(0)     // colours in table, important colours
+        buf.putInt(256); buf.putInt(0)     // colors in table, important colors
 
         // Grayscale colour table: 256 × (B, G, R, 0x00)
         for (i in 0..255) {
@@ -892,7 +894,7 @@ internal class FingerprintReaderWrapper(
 
     /**
      * Converts a raw grayscale byte array from the sensor into an ARGB_8888 [Bitmap].
-     * Each byte value (0–255) is mapped to an equal R/G/B grey pixel with full alpha.
+     * Each byte value (0–255) is mapped to an equal R/G/B gray pixel with full alpha.
      *
      * @param image  Grayscale image bytes with dimensions from [scanFormatInfo].
      */

@@ -1,6 +1,7 @@
 package com.scanner.updated
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.content.Intent
@@ -63,6 +64,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Date
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Refactored scanner activity.
@@ -96,6 +98,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
 
     // ── Views ─────────────────────────────────────────────────────────────────
     private var tvStatus: AppCompatTextView? = null
+    private var tvStatusLeft: AppCompatTextView? = null
+    private var tvStatusRight: AppCompatTextView? = null
     private var tvLeftQuality: AppCompatTextView? = null
     private var tvRightQuality: AppCompatTextView? = null
     private var btnStart: AppCompatButton? = null
@@ -148,6 +152,18 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
 
     /** Tracks per-reader identification results for the two-finger verification check. */
     private val identificationResults = mutableMapOf<Int, com.nextbiometrics.biometrics.NBBiometricsIdentifyResult?>()
+
+    /**
+     * Tracks, per reader, whether a genuine PUT_FINGER_ON_SENSOR / KEEP_FINGER_ON_SENSOR status
+     * has been observed in the current scan pass. Reset alongside [clearSessionData] at the
+     * start of every fresh scan attempt.
+     *
+     * Needed because the NextBiometrics hardware can report a LIFT_FINGER status as the very
+     * first event of a pass — a stale finger-presence latch left over from before the reader
+     * went to sleep (see FingerprintScanner_SleepMode_Issue.docx) — with no finger ever having
+     * touched the sensor. A LIFT_FINGER can only be genuine if a PUT/KEEP was seen first.
+     */
+    private val fingerSeenOnSensor = mutableMapOf<Int, Boolean>()
 
     // ── Low power mode tracking ───────────────────────────────────────────────
     // Matches ScannerActivity: incremented once per reader per low-power event.
@@ -259,6 +275,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     /** Finds all views from the existing XML layout by their IDs. */
     private fun bindViews() {
         tvStatus = findViewById(R.id.tvStatus)
+        tvStatusLeft = findViewById(R.id.tvStatusLeft)
+        tvStatusRight = findViewById(R.id.tvStatusRight)
         btnStart = findViewById(R.id.btnStart)
         btnCancel = findViewById(R.id.btnCancel)
         ivScannerLeft = findViewById(R.id.ivScannerLeft)
@@ -292,6 +310,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             btnCancel?.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, theme.buttonColor))
             btnCancel?.setTextColor(ContextCompat.getColor(this, theme.buttonTextColor))
             tvStatus?.setTextColor(ContextCompat.getColor(this, theme.messageColor))
+            tvStatusLeft?.setTextColor(ContextCompat.getColor(this, theme.messageColor))
+            tvStatusRight?.setTextColor(ContextCompat.getColor(this, theme.messageColor))
             tvScanFingerprints?.setTextColor(ContextCompat.getColor(this, theme.titleTextColor))
             tvScanMessage?.setTextColor(ContextCompat.getColor(this, theme.contentTextColor))
             btnStart?.background = ContextCompat.getDrawable(this, theme.buttonBackground)
@@ -306,6 +326,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         btnCancel?.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.infraRed))
         btnCancel?.setTextColor(ContextCompat.getColor(this, R.color.white))
         tvStatus?.setTextColor(ContextCompat.getColor(this, R.color.robinEggBlue))
+        tvStatusLeft?.setTextColor(ContextCompat.getColor(this, R.color.robinEggBlue))
+        tvStatusRight?.setTextColor(ContextCompat.getColor(this, R.color.robinEggBlue))
         tvScanFingerprints?.setTextColor(ContextCompat.getColor(this, R.color.black))
         tvScanMessage?.setTextColor(ContextCompat.getColor(this, R.color.black))
         btnStart?.background = ContextCompat.getDrawable(this, R.drawable.bg_round_white)
@@ -514,6 +536,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 clearSessionData()
                 sleepModeTrack = 0
                 setMessage("Initializing sensor, please wait…")
+                tvStatusLeft?.text = ""
+                tvStatusRight?.text = ""
                 setCancelButtonVisible(true)
                 setStartButtonVisible(false)
                 sessionManager.startScan(storagePath)
@@ -531,7 +555,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         setCancelButtonVisible(true)
                         setStartButtonVisible(false)
                         lifecycleScope.launch {
-                            delay(2000)
+                            delay(2000.milliseconds)
                             sessionManager.startScan(storagePath)
                         }
                     }
@@ -729,15 +753,33 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         previewType: PreviewListenerType,
         readerNo: Int,
     ) {
+        if (status == NBDeviceScanStatus.PUT_FINGER_ON_SENSOR || status == NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR) {
+            fingerSeenOnSensor[readerNo] = true
+        }
+
         val message = when (status) {
-            NBDeviceScanStatus.PUT_FINGER_ON_SENSOR -> "Place your fingers on the sensor."
-            NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR -> "Please keep your fingers on the sensor."
-            NBDeviceScanStatus.LIFT_FINGER -> "Please lift your fingers."
+            NBDeviceScanStatus.PUT_FINGER_ON_SENSOR -> "Place your finger on the sensor."
+            NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR -> "Please keep your finger on the sensor."
+
+            NBDeviceScanStatus.LIFT_FINGER ->
+                if (fingerSeenOnSensor[readerNo] == true) {
+                    "Please lift your finger."
+                } else {
+                    // A LIFT_FINGER with no prior PUT/KEEP on this reader in this pass is a
+                    // stale finger-presence latch from the hardware, not a real user action —
+                    // nothing was ever placed to lift. Show the correct instruction instead.
+                    logDebug("UpdatedScannerActivity :: reader $readerNo reported LIFT_FINGER with no prior finger-on-sensor — treating as stale hardware state")
+                    "Place your finger on the sensor."
+                }
+
             NBDeviceScanStatus.WAIT_FOR_SENSOR_INITIALIZATION -> "Initializing sensor, please wait…"
             NBDeviceScanStatus.WAIT_FOR_DATA_PROCESSING -> "Processing…"
             else -> null  // no visible status change needed
         }
-        message?.let { setMessage(it) }
+        message?.let {
+            setReaderMessage(readerNo, it)
+            setMessage("")
+        }
     }
 
     /** Shows the low-quality retry prompt and schedules a new scan pass. */
@@ -884,7 +926,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         val result = userRepository.downloadTemplatesForUser(uid, templateDir)
         hideDownloadDialog()
 
-        if (result.isSuccess && (result.getOrDefault(0) ?: 0) > 0) {
+        if (result.isSuccess && result.getOrDefault(0) > 0) {
             initializeHardware()
         } else {
             showMessageAndFinish("Download failed", "Could not download fingerprint templates. Please try again.")
@@ -1015,11 +1057,29 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         runOnUiThread { tvStatus?.text = message }
     }
 
+    /**
+     * Updates the live status text for a single reader (0 = left, 1 = right) on the main thread.
+     * Kept separate from [setMessage] since both readers run concurrently and independently —
+     * routing their preview status through one shared label makes them appear to contradict
+     * each other when in fact they're just two different readers at different points in their
+     * own scan cycle.
+     */
+    private fun setReaderMessage(readerNo: Int, message: String) {
+        runOnUiThread {
+            if (readerNo == 0) tvStatusLeft?.text = message else tvStatusRight?.text = message
+        }
+    }
+
     /** Appends a message row to the scrollable message log. */
     private fun appendMessage(text: String, isError: Boolean) {
         runOnUiThread {
             val textView = TextView(applicationContext).apply {
-                if (isError) setTextColor(resources.getColor(R.color.error_message_color))
+                if (isError && context != null) setTextColor(
+                    ContextCompat.getColor(
+                        context,
+                        R.color.error_message_color
+                    )
+                )
                 append(text)
             }
             messagesHolder?.addView(textView)
@@ -1092,6 +1152,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         runOnUiThread {
             tvLeftQuality?.text = ""
             tvRightQuality?.text = ""
+            tvStatusLeft?.text = ""
+            tvStatusRight?.text = ""
             ivScannerLeft?.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_android_fingerprint_grey))
             ivScannerRight?.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_android_fingerprint_grey))
         }
@@ -1106,6 +1168,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         extractionSuccess.clear()
         identificationResults.clear()
         templateUploadPaths.clear()
+        fingerSeenOnSensor.clear()
         // sleepModeTrack is intentionally NOT reset here — it must accumulate across
         // retries so the > 6 threshold is reachable. Reset it explicitly at each
         // fresh scan start or after a full reinit.
@@ -1119,7 +1182,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     // Dialog management
     // ──────────────────────────────────────────────────────────────────────────
 
-    /** Shows the hardware initialisation dialog (created lazily). */
+    /** Shows the hardware initialization dialog (created lazily). */
     private fun showInitDialog() {
         runOnUiThread {
             runCatching {
@@ -1129,7 +1192,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         }
     }
 
-    /** Dismisses the hardware initialisation dialog if it is showing. */
+    /** Dismisses the hardware initialization dialog if it is showing. */
     private fun dismissInitDialog() {
         runOnUiThread { runCatching { initDialog?.dismiss() } }
     }
@@ -1274,9 +1337,10 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────────────────────────────────
 
     /** Returns the Android Settings ANDROID_ID for the device, or empty string on failure. */
+    @SuppressLint("HardwareIds")
     private fun getAndroidDeviceId(): String =
         runCatching {
-            android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+            Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
                 ?: ""
         }.getOrDefault("")
 
