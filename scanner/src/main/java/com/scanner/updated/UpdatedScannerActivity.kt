@@ -738,6 +738,18 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         sessionManager.initialize()
                     }
 
+                    current.reason.contains("Invalid operation", ignoreCase = true) -> {
+                        // "Invalid operation" means the SDK session itself is wedged — it can
+                        // still report isSessionOpen == true, so initializeHardware()'s
+                        // resetToReady() fast path would wrongly call it healthy and hand back
+                        // a session that immediately fails again. Force a full USB power-cycle
+                        // + reinit instead of trusting that shortcut.
+                        sleepModeTrack = 0
+                        resetFingerImages()
+                        showInitDialog()
+                        sessionManager.initialize()
+                    }
+
                     else -> {
                         // Genuine hardware failure (not sleep mode).
                         // Use initializeHardware() so resetToReady() can skip the power cycle

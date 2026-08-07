@@ -240,10 +240,12 @@ internal class ScannerSessionManager(
     private suspend fun performInitialization() = withContext(Dispatchers.IO) {
         val overallStart = System.currentTimeMillis()
         logTiming("performInitialization() ▶ start")
+        logTiming("performInitialization() ▶ Device State - Before init, reader 0 - ${reader0.getDeviceState()}")
+        logTiming("performInitialization() ▶ Device State - Before init, reader 1 - ${reader1.getDeviceState()}")
 
         // Dispose stale SDK sessions before power-cycling. Without this, setDevice() below
         // replaces the old NBDevice handles without calling dispose(), and the SDK's internal
-        // session tracking then returns "Invalid operation" on the next openSession() call.
+        // session tracking then returns "Invalid operation" on the next openSession() call.r
         // Must happen before USB power-OFF so dispose() can still communicate with the firmware.
         reader0.close()
         reader1.close()

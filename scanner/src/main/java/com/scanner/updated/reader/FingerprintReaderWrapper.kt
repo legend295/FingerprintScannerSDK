@@ -20,6 +20,7 @@ import com.nextbiometrics.devices.NBDeviceFingerPosition
 import com.nextbiometrics.devices.NBDeviceImageQualityAlgorithm
 import com.nextbiometrics.devices.NBDeviceScanFormatInfo
 import com.nextbiometrics.devices.NBDeviceSecurityModel
+import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.system.NextBiometricsException
 import com.scanner.app.ScannerApp
 import com.scanner.updated.model.ReaderResult
@@ -105,6 +106,9 @@ internal class FingerprintReaderWrapper(
     fun setDevice(nbDevice: NBDevice) {
         device = nbDevice
     }
+
+    /** Returns the device state, or null if no device has been set. */
+    fun getDeviceState(): NBDeviceState? = device?.state
 
     /** Returns the device mode status, or null if no device has been set. */
     fun getDeviceModeStatus(): Boolean? = device?.GetDeviceModeStatus()
