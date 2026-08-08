@@ -5,6 +5,7 @@ import android.util.Log
 import com.common.apiutil.powercontrol.PowerControl
 import com.newrelic.agent.android.NewRelic
 import com.nextbiometrics.devices.NBDevice
+import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.devices.NBDevices
 import com.scanner.updated.model.ReaderResult
 import com.scanner.updated.model.ScannerEvent
@@ -18,7 +19,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
@@ -32,7 +32,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -80,6 +79,19 @@ internal class ScannerSessionManager(
     // Exposed as read-only so UpdatedScannerActivity can read it without a separate flag.
     var isLowPowerEnabled = false
         private set
+
+    // ── Wake-wait coordination ────────────────────────────────────────────────
+    // True while performInitialization is parked in awaitReadersAwake() waiting for the user
+    // to touch the sensors. The init watchdog's clock is paused while this is set — a human
+    // touch can legitimately take far longer than INIT_TIMEOUT_MS.
+    @Volatile
+    private var awaitingWake = false
+
+    /**
+     * Set while the UI is being asked (via [ScannerEvent.ReadersNotResponding]) whether to keep
+     * waiting for the readers. Completed by [onWakeWaitDecision].
+     */
+    private var wakeDecision: CompletableDeferred<Boolean>? = null
 
     // ── Observable state ──────────────────────────────────────────────────────
 
@@ -172,27 +184,42 @@ internal class ScannerSessionManager(
     /**
      * Starts hardware initialization asynchronously.
      *
-     * Steps:
-     * 1. USB power cycle (off → 1 s delay → on → 1 s delay).
-     * 2. [NBDevices.initialize] with up to 25 s polling.
-     * 3. Wait for two [com.nextbiometrics.devices.NBDevice] instances to appear.
-     * 4. [FingerprintReaderWrapper.init] on each reader concurrently.
+     * The work performed depends on the aggregated [NBDeviceState] of both readers
+     * (see [performInitialization]) — a fully connected, awake pair only needs its sessions
+     * verified, while a disconnected pair goes through the full USB power cycle.
      *
      * Emits [ScannerState.Initializing] immediately, then [ScannerState.Ready] on success or
-     * [ScannerState.Failed] with a reason string on any failure.
+     * [ScannerState.Failed] with a reason string on any failure. The state stays
+     * [ScannerState.Initializing] for the whole run, including any [awaitReadersAwake] pause.
      *
      * Calling [initialize] while an init job is already running cancels the previous one.
      */
     fun initialize() {
         cancelActiveJob()
-        _state.value = ScannerState.Initializing
+        // Seed the state from the hardware rather than always starting at Initializing.
+        // performInitialization() parks in awaitReadersAwake() before doing anything else when
+        // the readers are asleep, so publishing Initializing first would flash an init dialog
+        // that is dismissed a frame later.
+        _state.value = if (isEitherReaderInLowPower()) {
+            ScannerState.AwaitingWake
+        } else {
+            ScannerState.Initializing
+        }
 
         // Watchdog: fires on its own thread after INIT_TIMEOUT_MS even when activeJob is
         // blocked inside a non-suspending SDK call (PowerControl.usbPower, NBDevices.initialize).
-        // withTimeout alone cannot interrupt a blocked thread — it only delivers at suspension
-        // points — so this sibling coroutine is the only reliable fallback.
+        // A plain withTimeout cannot interrupt a blocked thread — it only delivers at suspension
+        // points — so this sibling coroutine is the sole timeout authority for initialize().
+        //
+        // The clock ticks in WATCHDOG_TICK_MS steps rather than one long delay so it can be
+        // paused while awaitReadersAwake() waits on a human; that wait has its own
+        // WAKE_TIMEOUT_MS budget and must not count against the hardware timeout.
         watchdogJob = managerScope.launch {
-            delay(INIT_TIMEOUT_MS.milliseconds)
+            var elapsedMs = 0L
+            while (elapsedMs < INIT_TIMEOUT_MS) {
+                delay(WATCHDOG_TICK_MS.milliseconds)
+                if (!awaitingWake) elapsedMs += WATCHDOG_TICK_MS
+            }
             if (_state.value is ScannerState.Initializing) {
                 logError("$tag initialize() → Watchdog timed out after ${INIT_TIMEOUT_MS / 1000}s")
                 _state.value = ScannerState.Failed("Fingerprint reader did not respond. Please retry.")
@@ -202,20 +229,12 @@ internal class ScannerSessionManager(
 
         activeJob = managerScope.launch {
             try {
-                withTimeout(INIT_TIMEOUT_MS.milliseconds) {
-                    performInitialization()
-                }
+                performInitialization()
                 watchdogJob?.cancel()
                 // Guard: watchdog may have already set Failed while we were blocked in native code.
                 if (_state.value is ScannerState.Initializing) {
                     _state.value = ScannerState.Ready
                     logDebug("$tag initialize() → Ready")
-                }
-            } catch (_: TimeoutCancellationException) {
-                watchdogJob?.cancel()
-                logError("$tag initialize() → Timed out after ${INIT_TIMEOUT_MS / 1000}s")
-                if (_state.value is ScannerState.Initializing) {
-                    _state.value = ScannerState.Failed("Fingerprint reader did not respond. Please retry.")
                 }
             } catch (e: CancellationException) {
                 watchdogJob?.cancel()
@@ -234,15 +253,76 @@ internal class ScannerSessionManager(
     }
 
     /**
-     * Performs the blocking initialization work.
-     * Must be called from an IO coroutine. Throws on any unrecoverable failure.
+     * Performs the initialization work, choosing the cheapest path that can get both readers
+     * to a scannable state. Must be called from an IO coroutine; throws on any unrecoverable
+     * failure.
+     *
+     * Low-power (sleep) mode is resolved first, before anything else, because every path below
+     * either opens a session or calls [FingerprintReaderWrapper.init] and both fail against a
+     * sleeping reader. Once the readers are awake the path is chosen from their aggregated
+     * [NBDeviceState] (see [aggregateDeviceState]):
+     *
+     * - **[NBDeviceState.AWAKE]** — the hardware is alive. No power cycle and no SDK re-init;
+     *   [ensureReadersInitialized] just opens any closed session.
+     * - **[NBDeviceState.NOT_AWAKE]** — idle but connected; [ensureReadersInitialized] opens
+     *   the sessions.
+     * - **[NBDeviceState.NOT_CONNECTED]** — no usable handle, so [performFullHardwareInit]
+     *   runs the complete USB power-cycle + SDK enumeration sequence.
      */
     private suspend fun performInitialization() = withContext(Dispatchers.IO) {
         val overallStart = System.currentTimeMillis()
         logTiming("performInitialization() ▶ start")
-        logTiming("performInitialization() ▶ Device State - Before init, reader 0 - ${reader0.getDeviceState()}")
-        logTiming("performInitialization() ▶ Device State - Before init, reader 1 - ${reader1.getDeviceState()}")
 
+        // Handle low power mode before reading the device state. Sleeping hardware only wakes on
+        // finger contact — a power cycle will not do it — and waking first means the state read
+        // below reflects live hardware instead of a device that is merely asleep.
+        if (isEitherReaderInLowPower()) {
+            logDebug("$tag performInitialization() → reader(s) in low power mode, waking before state check")
+            awaitReadersAwake()
+        } else if (_state.value is ScannerState.AwaitingWake) {
+            // initialize() seeded AwaitingWake but the readers woke before we got here.
+            _state.value = ScannerState.Initializing
+        }
+
+        val state0 = reader0.getDeviceState()
+        val state1 = reader1.getDeviceState()
+        logTiming("performInitialization() ▶ Device State - Before init, reader 0 - $state0")
+        logTiming("performInitialization() ▶ Device State - Before init, reader 1 - $state1")
+        logTiming("performInitialization() ▶ Device State - Before init, isInitialized - ${NBDevices.isInitialized()}")
+
+        when (aggregateDeviceState(state0, state1)) {
+            NBDeviceState.AWAKE -> {
+                logDebug("$tag performInitialization() → both readers AWAKE, verifying sessions only")
+                ensureReadersInitialized()
+            }
+
+            NBDeviceState.NOT_AWAKE -> {
+                // Not sleeping — that was already handled above — just idle, so sessions suffice.
+                logDebug("$tag performInitialization() → reader(s) NOT_AWAKE but not sleeping")
+                ensureReadersInitialized()
+            }
+
+            NBDeviceState.NOT_CONNECTED -> {
+                logDebug("$tag performInitialization() → reader(s) NOT_CONNECTED, full hardware init")
+                performFullHardwareInit()
+            }
+        }
+
+        logTiming("performInitialization() ■ TOTAL ${elapsedSec(overallStart)}s")
+    }
+
+    /**
+     * Runs the complete recovery sequence for disconnected readers:
+     * 1. Dispose stale SDK sessions.
+     * 2. USB power cycle (off → 2 s delay → on → 2 s delay).
+     * 3. [NBDevices.initialize] with up to 25 s polling.
+     * 4. Wait for two [NBDevice] instances to appear and bind them to the wrappers.
+     * 5. Wait out low-power mode if the readers came back asleep.
+     * 6. [FingerprintReaderWrapper.init] on each reader concurrently.
+     *
+     * Throws on any unrecoverable failure.
+     */
+    private suspend fun performFullHardwareInit() {
         // Dispose stale SDK sessions before power-cycling. Without this, setDevice() below
         // replaces the old NBDevice handles without calling dispose(), and the SDK's internal
         // session tracking then returns "Invalid operation" on the next openSession() call.r
@@ -252,34 +332,34 @@ internal class ScannerSessionManager(
 
         // USB power OFF
         var stepStart = System.currentTimeMillis()
-        logDebug("$tag performInitialization() → USB power cycle")
-        logTiming("performInitialization() → usbPower(0) start")
+        logDebug("$tag performFullHardwareInit() → USB power cycle")
+        logTiming("performFullHardwareInit() → usbPower(0) start")
         PowerControl(context).usbPower(0)
-        logTiming("performInitialization() → usbPower(0) done in ${elapsedSec(stepStart)}s")
+        logTiming("performFullHardwareInit() → usbPower(0) done in ${elapsedSec(stepStart)}s")
 
         delay(2000.milliseconds)
 
         // USB power ON
         stepStart = System.currentTimeMillis()
-        logTiming("performInitialization() → usbPower(1) start")
+        logTiming("performFullHardwareInit() → usbPower(1) start")
         PowerControl(context).usbPower(1)
-        logTiming("performInitialization() → usbPower(1) done in ${elapsedSec(stepStart)}s")
+        logTiming("performFullHardwareInit() → usbPower(1) done in ${elapsedSec(stepStart)}s")
 
         delay(2000.milliseconds)
 
         // Initialize the NBDevices SDK (idempotent if already initialized).
         stepStart = System.currentTimeMillis()
-        logTiming("performInitialization() → NBDevices.initialize start")
+        logTiming("performFullHardwareInit() → NBDevices.initialize start")
         NBDevices.initialize(context)
-        logTiming("performInitialization() → NBDevices.initialize done in ${elapsedSec(stepStart)}s")
+        logTiming("performFullHardwareInit() → NBDevices.initialize done in ${elapsedSec(stepStart)}s")
 
         // Poll until the SDK signals it is ready, up to 25 seconds.
         stepStart = System.currentTimeMillis()
-        logTiming("performInitialization() → polling NBDevices.isInitialized start")
+        logTiming("performFullHardwareInit() → polling NBDevices.isInitialized start")
         val sdkReady = pollUntil(maxAttempts = 50, delayMs = 500) {
             NBDevices.isInitialized()
         }
-        logTiming("performInitialization() → NBDevices.isInitialized ready=$sdkReady in ${elapsedSec(stepStart)}s")
+        logTiming("performFullHardwareInit() → NBDevices.isInitialized ready=$sdkReady in ${elapsedSec(stepStart)}s")
         if (!sdkReady) {
             throw IllegalStateException("NBDevices SDK did not initialize within the timeout.")
         }
@@ -287,41 +367,63 @@ internal class ScannerSessionManager(
         // Wait until at least two device handles are available.
         var devices = emptyArray<NBDevice>()
         stepStart = System.currentTimeMillis()
-        logTiming("performInitialization() → polling NBDevices.getDevices start")
+        logTiming("performFullHardwareInit() → polling NBDevices.getDevices start")
         val devicesFound = pollUntil(maxAttempts = 50, delayMs = 1000) {
             devices = NBDevices.getDevices()
             devices.size >= 2
         }
-        logTiming("performInitialization() → NBDevices.getDevices found=${devices.size} in ${elapsedSec(stepStart)}s")
+        logTiming("performFullHardwareInit() → NBDevices.getDevices found=${devices.size} in ${elapsedSec(stepStart)}s")
         if (!devicesFound || devices.size < 2) {
             throw IllegalStateException("Expected 2 readers, found ${devices.size}.")
         }
 
-        logDebug("$tag performInitialization() → found ${devices.size} devices, initializing readers")
+        logDebug("$tag performFullHardwareInit() → found ${devices.size} devices, initializing readers")
 
         reader0.setDevice(devices[0])
         reader1.setDevice(devices[1])
 
-        // Initialize both readers concurrently. Each init() has its own 30 s hard timeout via
-        // a thread-pool Future.get(). Running them sequentially would risk the init watchdog
-        // firing mid-way through the second reader even when both are just slow.
-        stepStart = System.currentTimeMillis()
-        logTiming("performInitialization() → reader0.init + reader1.init start")
+        // The readers can come back from the power cycle already in low-power mode. init()
+        // fails against a sleeping reader, so park here until the user has touched both
+        // sensors before opening any session.
+        if (isEitherReaderInLowPower()) {
+            logDebug("$tag performFullHardwareInit() → readers came up in low power mode, waiting for wake")
+            awaitReadersAwake()
+        }
+
+        ensureReadersInitialized()
+    }
+
+    /**
+     * Brings both readers to a scannable state, concurrently.
+     *
+     * A reader that is already [FingerprintReaderWrapper.isReady] is left untouched; otherwise
+     * [FingerprintReaderWrapper.init] opens its session, re-reads the supported scan formats and
+     * re-applies anti-spoof. `init()` is used rather than a bare `openSession()` because a
+     * session alone leaves `isInitialized` false and `scanFormatInfo` null, which makes the very
+     * next [FingerprintReaderWrapper.scanAndExtractFlow] fail with "Reader not initialized".
+     *
+     * Each `init()` carries its own 30 s hard timeout via a thread-pool `Future.get()`. Running
+     * them sequentially would risk the init watchdog firing mid-way through the second reader
+     * even when both are just slow.
+     *
+     * @throws IllegalStateException if either reader could not be initialized.
+     */
+    private suspend fun ensureReadersInitialized() {
+        val stepStart = System.currentTimeMillis()
+        logTiming("ensureReadersInitialized() → reader0.init + reader1.init start")
         val (init0, init1) = coroutineScope {
             listOf(
-                async { reader0.init() },
-                async { reader1.init() },
+                async { reader0.isReady() || reader0.init() },
+                async { reader1.isReady() || reader1.init() },
             ).awaitAll()
         }
-        logTiming("performInitialization() → readers init done in ${elapsedSec(stepStart)}s (reader0=$init0, reader1=$init1)")
+        logTiming("ensureReadersInitialized() → done in ${elapsedSec(stepStart)}s (reader0=$init0, reader1=$init1)")
 
         if (!init0 || !init1) {
             throw IllegalStateException(
                 "Reader initialization failed — reader0=$init0, reader1=$init1"
             )
         }
-
-        logTiming("performInitialization() ■ TOTAL ${elapsedSec(overallStart)}s")
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -529,6 +631,113 @@ internal class ScannerSessionManager(
         reader0.getDeviceModeStatus() == false && reader1.getDeviceModeStatus() == false
 
     /**
+     * Returns true when at least one reader reports low-power (sleep) mode.
+     *
+     * A null status (no device bound, or the SDK call threw) counts as *not* sleeping so the
+     * caller falls through to [ensureReadersInitialized], which surfaces the real error instead
+     * of parking the user in front of a wake prompt that can never be satisfied.
+     */
+    fun isEitherReaderInLowPower(): Boolean =
+        reader0.getDeviceModeStatus() == true || reader1.getDeviceModeStatus() == true
+
+    /**
+     * True while [awaitReadersAwake] is parked waiting for the UI to answer
+     * [ScannerEvent.ReadersNotResponding].
+     *
+     * Lets the UI recover the prompt when it renders [ScannerState.AwaitingWake] after having
+     * missed the one-shot event (e.g. the activity was stopped when it fired) — without this,
+     * initialisation would stay suspended with nothing on screen to move it forward.
+     */
+    val isAwaitingWakeDecision: Boolean
+        get() = wakeDecision != null
+
+    /**
+     * Reduces the two readers' [NBDeviceState]s to the single worst-of-two state that drives
+     * [performInitialization].
+     *
+     * Worst-of-two keeps the dual-reader parity guarantee: both readers always take the same
+     * recovery path. It also reflects the hardware — [PowerControl.usbPower] cuts power to both
+     * readers at once, so there is no way to power-cycle one without disturbing the other.
+     *
+     * A null state (no device bound yet, e.g. on the very first launch or after [release])
+     * is treated as [NBDeviceState.NOT_CONNECTED].
+     */
+    private fun aggregateDeviceState(state0: NBDeviceState?, state1: NBDeviceState?): NBDeviceState =
+        when {
+            state0 == null || state1 == null -> NBDeviceState.NOT_CONNECTED
+            state0 == NBDeviceState.NOT_CONNECTED || state1 == NBDeviceState.NOT_CONNECTED -> NBDeviceState.NOT_CONNECTED
+            state0 == NBDeviceState.NOT_AWAKE || state1 == NBDeviceState.NOT_AWAKE -> NBDeviceState.NOT_AWAKE
+            else -> NBDeviceState.AWAKE
+        }
+
+    /**
+     * Suspends until both readers report themselves awake, polling every
+     * [WAKE_POLL_INTERVAL_MS] ms. Only a finger touch wakes sleeping hardware, so this waits on
+     * the user rather than on the SDK.
+     *
+     * Publishes [ScannerState.AwaitingWake] so the UI can prompt for a sensor touch and hide the
+     * Start Scan button, and restores [ScannerState.Initializing] once they respond. A retained
+     * state is used rather than an event because this wait typically starts during the host
+     * activity's `onCreate`, before its event collector is active — an event emitted that early
+     * has no subscribers and is silently dropped.
+     *
+     * If they stay asleep for [WAKE_TIMEOUT_MS], [ScannerEvent.ReadersNotResponding] is emitted
+     * and this suspends indefinitely until the UI calls [onWakeWaitDecision] — `true` restarts
+     * the wait, `false` aborts initialisation.
+     *
+     * [awaitingWake] is held for the duration so the init watchdog's clock stays paused.
+     *
+     * @throws CancellationException if the user chooses not to keep waiting.
+     */
+    private suspend fun awaitReadersAwake() {
+        isLowPowerEnabled = true
+        awaitingWake = true
+        _state.value = ScannerState.AwaitingWake
+        try {
+            while (true) {
+                logDebug("$tag awaitReadersAwake() → waiting for both readers to wake")
+
+                val awake = pollUntil(
+                    maxAttempts = (WAKE_TIMEOUT_MS / WAKE_POLL_INTERVAL_MS).toInt(),
+                    delayMs = WAKE_POLL_INTERVAL_MS,
+                ) { areBothReadersAwake() }
+
+                if (awake) {
+                    isLowPowerEnabled = false
+                    logDebug("$tag awaitReadersAwake() → both readers awake")
+                    _state.value = ScannerState.Initializing
+                    return
+                }
+
+                // No response within the window — hand the decision to the user and stay parked.
+                val decision = CompletableDeferred<Boolean>()
+                wakeDecision = decision
+                logError("$tag awaitReadersAwake() → no response after ${WAKE_TIMEOUT_MS / 1000}s")
+                _events.emit(ScannerEvent.ReadersNotResponding)
+
+                if (!decision.await()) {
+                    throw CancellationException("Session ended while waiting for the readers to wake up")
+                }
+                wakeDecision = null
+            }
+        } finally {
+            awaitingWake = false
+            wakeDecision = null
+        }
+    }
+
+    /**
+     * Reports the user's answer to the [ScannerEvent.ReadersNotResponding] prompt back into the
+     * suspended [awaitReadersAwake] call. No-op if no wake wait is currently parked.
+     *
+     * @param keepWaiting  true to restart the wake wait, false to abort initialisation.
+     */
+    fun onWakeWaitDecision(keepWaiting: Boolean) {
+        logDebug("$tag onWakeWaitDecision(keepWaiting=$keepWaiting)")
+        wakeDecision?.complete(keepWaiting)
+    }
+
+    /**
      * Immediately sets the state to [ScannerState.Ready] without any hardware check.
      *
      * Use this in [android.app.Activity.onCreate] right after reusing the singleton, before
@@ -637,6 +846,10 @@ internal class ScannerSessionManager(
         watchdogJob = null
         activeJob?.cancel()
         activeJob = null
+        // activeJob is the only coroutine that can be parked in awaitReadersAwake(); clear the
+        // pause flag here too so a freshly launched watchdog never starts on a stale pause.
+        awaitingWake = false
+        wakeDecision = null
     }
 
     /**
@@ -668,6 +881,22 @@ internal class ScannerSessionManager(
 
     companion object {
         private const val INIT_TIMEOUT_MS = 30_000L
+
+        /**
+         * Granularity of the init watchdog's clock. Small enough that pausing it during
+         * [awaitReadersAwake] is accurate, large enough to stay cheap.
+         */
+        private const val WATCHDOG_TICK_MS = 500L
+
+        /** How often [awaitReadersAwake] re-checks [areBothReadersAwake]. */
+        private const val WAKE_POLL_INTERVAL_MS = 2_000L
+
+        /**
+         * How long [awaitReadersAwake] waits for a finger touch before asking the user whether
+         * to keep waiting. Matches the scan-time sleep prompt in
+         * [com.scanner.updated.UpdatedScannerActivity.startSleepModePolling].
+         */
+        const val WAKE_TIMEOUT_MS = 30_000L
 
         // 60 s gives even slow users (unusual grip, thick calluses) time to place their fingers.
         // 30 s was too aggressive and could fire on perfectly healthy hardware.

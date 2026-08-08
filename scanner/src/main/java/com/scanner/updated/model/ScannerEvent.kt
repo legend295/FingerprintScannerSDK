@@ -117,6 +117,20 @@ sealed class ScannerEvent {
     data class DeviceInSleepMode(val readerNo: Int) : ScannerEvent()
 
     /**
+     * The readers did not wake within
+     * [com.scanner.updated.reader.ScannerSessionManager.WAKE_TIMEOUT_MS] of entering
+     * [ScannerState.AwaitingWake].
+     *
+     * The UI must ask the user whether to keep waiting and report the answer back via
+     * [com.scanner.updated.reader.ScannerSessionManager.onWakeWaitDecision] — initialisation
+     * stays suspended until it does. If this event is missed (activity not started), the
+     * prompt is recovered from
+     * [com.scanner.updated.reader.ScannerSessionManager.isAwaitingWakeDecision] when
+     * [ScannerState.AwaitingWake] is next rendered.
+     */
+    object ReadersNotResponding : ScannerEvent()
+
+    /**
      * Unrecoverable error on this reader (hardware fault, SDK exception, or file I/O failure).
      * When emitted the flow terminates, and [com.scanner.updated.reader.ScannerSessionManager]
      * cancels the opposite reader.

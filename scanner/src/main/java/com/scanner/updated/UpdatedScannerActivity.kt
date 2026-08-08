@@ -188,6 +188,14 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     /** Tracks per-reader extraction success for the two-finger parity check. */
     private val extractionSuccess = mutableMapOf<Int, Boolean>()
 
+    /**
+     * True while the Start button reads "Scan again" because [handleLowQuality] rejected the
+     * last pass. The session stays in [ScannerState.Success] through a low-quality retry, so
+     * [handleStartClick] needs this to tell a rescan apart from a result delivery.
+     * Cleared by [clearSessionData].
+     */
+    private var retryAfterLowQuality = false
+
     /** Tracks per-reader identification results for the two-finger verification check. */
     private val identificationResults = mutableMapOf<Int, com.nextbiometrics.biometrics.NBBiometricsIdentifyResult?>()
 
@@ -491,6 +499,19 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 setCancelButtonVisible(false)
             }
 
+            is ScannerState.AwaitingWake -> {
+                // Initialization is parked until the user touches both sensors. Driven by state
+                // rather than an event because this can begin before the activity is STARTED,
+                // and only a retained state survives that.
+                dismissInitDialog()
+                resetFingerImages()
+                setStartButtonVisible(false)
+                setCancelButtonVisible(false)
+                setMessage("Device is in sleep mode. Please touch both finger sensors to wake them up.")
+                // Recover the prompt if the wait timed out while this activity wasn't collecting.
+                if (sessionManager.isAwaitingWakeDecision) showInitWakeNoResponseDialog()
+            }
+
             is ScannerState.Ready -> {
                 dismissInitDialog()
                 setMessage(getString(R.string.scan))
@@ -611,6 +632,34 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The initialization-time counterpart of [showReaderNoResponseDialog], shown when
+     * [ScannerEvent.ReadersNotResponding] arrives because the readers stayed asleep for
+     * [ScannerSessionManager.WAKE_TIMEOUT_MS].
+     *
+     * Unlike the scan-time dialog, the wait itself lives inside
+     * [ScannerSessionManager.awaitReadersAwake], which is suspended until the answer is passed
+     * back through [ScannerSessionManager.onWakeWaitDecision] — so both buttons must report a
+     * decision, otherwise initialization stays parked forever.
+     */
+    private fun showInitWakeNoResponseDialog() {
+        runOnUiThread {
+            readerNoResponseDialog = AlertDialog.Builder(this)
+                .setMessage("There is no response from the readers. Do you want to continue this session")
+                .setCancelable(false)
+                .setPositiveButton("Yes") { dialog, _ ->
+                    dialog.dismiss()
+                    sessionManager.onWakeWaitDecision(keepWaiting = true)
+                }
+                .setNegativeButton("No") { dialog, _ ->
+                    dialog.dismiss()
+                    sessionManager.onWakeWaitDecision(keepWaiting = false)
+                    cancelSession()
+                }
+                .show()
+        }
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Event handling
     // ──────────────────────────────────────────────────────────────────────────
@@ -670,6 +719,10 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 appendMessage("Reader ${event.readerNo + 1} is in sleep mode. Please reinitialise.", true)
             }
 
+            is ScannerEvent.ReadersNotResponding -> {
+                showInitWakeNoResponseDialog()
+            }
+
             is ScannerEvent.SpoofDetected -> {
                 logError("UpdatedScannerActivity :: Spoof detected on reader ${event.readerNo}")
                 // UI is handled by renderState(ScannerState.Failed) which fires immediately after.
@@ -694,21 +747,16 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      * Handles Start button clicks. The appropriate action depends on the current [ScannerState]:
      * - [ScannerState.Ready] → start a new scan pass.
      * - [ScannerState.Failed] / [ScannerState.Cancelled] → re-initialise hardware.
-     * - [ScannerState.Success] (verification) → deliver result and finish.
+     * - [ScannerState.Success] → deliver the result, unless [retryAfterLowQuality] is set, in
+     *   which case start another scan pass instead.
      * - Other states → no-op (prevents double-tapping during transitions).
      */
     private fun handleStartClick() {
         val storagePath = scanningOptions?.storagePath ?: DEFAULT_STORAGE_PATH
         when (val current = sessionManager.state.value) {
             is ScannerState.Ready -> {
-                clearSessionData()
                 sleepModeTrack = 0
-                setMessage("Initializing sensor, please wait…")
-                tvStatusLeft?.text = ""
-                tvStatusRight?.text = ""
-                setCancelButtonVisible(true)
-                setStartButtonVisible(false)
-                sessionManager.startScan(storagePath)
+                beginScanPass(storagePath)
             }
 
             is ScannerState.Failed -> {
@@ -734,7 +782,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         // Bypass resetToReady() and force a full USB power-cycle + reinit,
                         // because the device is stuck and won't recover from a scan retry alone.
                         sleepModeTrack = 0
-                        showInitDialog()
+                        showInitDialogUnlessSleeping()
                         sessionManager.initialize()
                     }
 
@@ -746,7 +794,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         // + reinit instead of trusting that shortcut.
                         sleepModeTrack = 0
                         resetFingerImages()
-                        showInitDialog()
+                        showInitDialogUnlessSleeping()
                         sessionManager.initialize()
                     }
 
@@ -768,6 +816,16 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             }
 
             is ScannerState.Success -> {
+                // handleLowQuality() leaves the session in Success — it only repaints the button
+                // as "Scan again" — so this branch has to distinguish a rescan from a delivery.
+                // Without the flag the click would fall through to deliverRegistrationResult()
+                // and report "Fingerprint not found", because handleLowQuality() already cleared
+                // the file lists that method delivers.
+                if (retryAfterLowQuality) {
+                    retryAfterLowQuality = false
+                    beginScanPass(storagePath)
+                    return
+                }
                 // Do NOT clear session data here — templateFilePaths must still be populated.
                 // For VERIFICATION the dialog shown in handleScanSuccess() handles delivery;
                 // tapping Done in that state is a no-op to avoid a double-finish.
@@ -778,6 +836,25 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
 
             else -> logDebug("UpdatedScannerActivity :: handleStartClick ignored in state: $current")
         }
+    }
+
+    /**
+     * Resets the per-scan UI and data, then starts a fresh scan pass.
+     *
+     * Shared by the [ScannerState.Ready] and low-quality-retry paths of [handleStartClick].
+     * [ScannerSessionManager.startScan] accepts Ready, Success and Failed, so a retry from
+     * Success needs no intermediate state transition.
+     *
+     * @param storagePath  Directory for the WSQ/JPEG output of this pass.
+     */
+    private fun beginScanPass(storagePath: String) {
+        clearSessionData()
+        setMessage("Initializing sensor, please wait…")
+        tvStatusLeft?.text = ""
+        tvStatusRight?.text = ""
+        setCancelButtonVisible(true)
+        setStartButtonVisible(false)
+        sessionManager.startScan(storagePath)
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -966,6 +1043,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     /** Shows the low-quality retry prompt and schedules a new scan pass. */
     private fun handleLowQuality() {
         clearSessionData()
+        // Must be set AFTER clearSessionData(), which clears it.
+        retryAfterLowQuality = true
         setMessage("Scan quality below 50%. Please try again.")
         setStartButton("Scan again", visible = true)
         setCancelButtonVisible(false)
@@ -1124,7 +1203,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         // resetToReady() returns false and sets Failed if either session has dropped, in
         // which case we fall through to a full reinitialise.
         if (sessionManager.resetToReady()) return
-        showInitDialog()
+        showInitDialogUnlessSleeping()
         sessionManager.initialize()
     }
 
@@ -1378,6 +1457,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         identificationResults.clear()
         templateUploadPaths.clear()
         fingerSeenOnSensor.clear()
+        retryAfterLowQuality = false
         // sleepModeTrack is intentionally NOT reset here — it must accumulate across
         // retries so the > 6 threshold is reachable. Reset it explicitly at each
         // fresh scan start or after a full reinit.
@@ -1399,6 +1479,18 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 initDialog?.show()
             }
         }
+    }
+
+    /**
+     * Shows the init dialog only when [ScannerSessionManager.initialize] is actually going to
+     * initialise hardware.
+     *
+     * When the readers are asleep, `initialize()` publishes [ScannerState.AwaitingWake]
+     * immediately and the UI shows the wake prompt instead — showing the dialog here first would
+     * flash it on screen for a frame before [renderState] dismisses it.
+     */
+    private fun showInitDialogUnlessSleeping() {
+        if (!sessionManager.isEitherReaderInLowPower()) showInitDialog()
     }
 
     /** Dismisses the hardware initialization dialog if it is showing. */

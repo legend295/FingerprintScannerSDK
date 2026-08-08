@@ -107,11 +107,21 @@ internal class FingerprintReaderWrapper(
         device = nbDevice
     }
 
-    /** Returns the device state, or null if no device has been set. */
-    fun getDeviceState(): NBDeviceState? = device?.state
+    /**
+     * Returns the device state, or null if no device has been set or the SDK call threw.
+     *
+     * A null result is treated by [ScannerSessionManager] exactly like
+     * [NBDeviceState.NOT_CONNECTED] — there is no usable handle either way.
+     */
+    fun getDeviceState(): NBDeviceState? = runCatching { device?.state }.getOrNull()
 
-    /** Returns the device mode status, or null if no device has been set. */
-    fun getDeviceModeStatus(): Boolean? = device?.GetDeviceModeStatus()
+    /**
+     * Returns true when the device is in low-power (sleep) mode, false when it is awake,
+     * or null if no device has been set or the SDK call threw.
+     *
+     * Backed by the SDK's `NBIsDeviceInLowPowerMode`, so `true` means "asleep".
+     */
+    fun getDeviceModeStatus(): Boolean? = runCatching { device?.GetDeviceModeStatus() }.getOrNull()
 
     /** Returns true only when [init] completed successfully. */
     fun isReady(): Boolean = isInitialized && device?.isSessionOpen == true
@@ -508,7 +518,9 @@ internal class FingerprintReaderWrapper(
     fun close() {
         logDebug("$tag close() called")
         cancel()
-        runCatching { device?.dispose() }
+        runCatching {
+            device?.dispose()
+        }
         device = null
         isInitialized = false
     }
@@ -766,11 +778,12 @@ internal class FingerprintReaderWrapper(
             File(templateDir).mkdirs()
 
             val rawBytes = ctx.saveTemplate(template)
-            val toWrite = if (skipFirebaseActions) {
+            val toWrite = KeyStorePortable.encryptData(rawBytes, bvnNumber, encryptionKey)
+            /*val toWrite = if (skipFirebaseActions) {
                 rawBytes
             } else {
                 KeyStorePortable.encryptData(rawBytes, bvnNumber, encryptionKey)
-            }
+            }*/
 
             val fileName = buildTimestampedFileName() + "$readerNo-ISO-Template.dat"
             val filePath = "$templateDir$fileName"

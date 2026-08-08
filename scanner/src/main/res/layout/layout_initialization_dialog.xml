@@ -28,6 +28,13 @@
                 app:layout_constraintTop_toTopOf="parent"
                 tools:visibility="visible" />
 
+            <View
+                android:id="@+id/viewClose"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                app:layout_constraintTop_toTopOf="@id/ivClose"
+                app:layout_constraintEnd_toEndOf="@id/ivClose" />
+
             <androidx.appcompat.widget.AppCompatTextView
                 android:id="@+id/tvTitle"
                 android:layout_width="wrap_content"

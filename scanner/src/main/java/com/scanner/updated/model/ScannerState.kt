@@ -27,6 +27,19 @@ sealed class ScannerState {
     object Initializing : ScannerState()
 
     /**
+     * Initialisation is paused because one or both readers are in low-power (sleep) mode and
+     * only a finger touch can wake them.
+     *
+     * The UI should hide the init dialog and the Start Scan button and prompt the user to touch
+     * both sensors. This is a [ScannerState] rather than a [ScannerEvent] deliberately: the wait
+     * can begin before the activity reaches `STARTED`, and only a retained state survives that —
+     * a one-shot event emitted that early is dropped and the UI never leaves "Initializing".
+     *
+     * Returns to [Initializing] once both readers wake.
+     */
+    object AwaitingWake : ScannerState()
+
+    /**
      * Both reader sessions are open and the scanner is ready to accept a scan command.
      * The UI should show the "Start Scan" button.
      */

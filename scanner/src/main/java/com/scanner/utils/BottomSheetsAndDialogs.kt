@@ -53,6 +53,7 @@ internal fun Context.verificationDialog(
         val title = findViewById<AppCompatTextView>(R.id.tvTitle)
         val message = findViewById<AppCompatTextView>(R.id.tvMessage)
         val ivClose = findViewById<AppCompatImageView>(R.id.ivClose)
+        val viewClose = findViewById<View>(R.id.viewClose)
         val ivStatus = findViewById<AppCompatImageView>(R.id.ivStatus)
         val progressBar = findViewById<ProgressBar>(R.id.progressBar)
         progressBar.visibility = View.GONE
@@ -68,6 +69,12 @@ internal fun Context.verificationDialog(
         title.text = if (isSuccess) "Transaction Authorised" else "Verification Failed"
         message.text =
             if (isSuccess) "The fingerprint authorization is\nsucceeded." else "The fingerprint provided does not match the details used during registration. Please try again using the registered fingerprint."
+
+        viewClose.setOnClickListener {
+            dialog.dismiss()
+            callback()
+        }
+
         ivClose.setOnClickListener {
             dialog.dismiss()
             callback()
