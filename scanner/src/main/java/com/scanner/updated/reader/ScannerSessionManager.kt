@@ -200,11 +200,12 @@ internal class ScannerSessionManager(
         // performInitialization() parks in awaitReadersAwake() before doing anything else when
         // the readers are asleep, so publishing Initializing first would flash an init dialog
         // that is dismissed a frame later.
-        _state.value = if (isEitherReaderInLowPower()) {
+        /*_state.value = if (isEitherReaderInLowPower()) {
             ScannerState.AwaitingWake
         } else {
             ScannerState.Initializing
-        }
+        }*/
+        _state.value = ScannerState.Initializing
 
         // Watchdog: fires on its own thread after INIT_TIMEOUT_MS even when activeJob is
         // blocked inside a non-suspending SDK call (PowerControl.usbPower, NBDevices.initialize).
@@ -215,11 +216,7 @@ internal class ScannerSessionManager(
         // paused while awaitReadersAwake() waits on a human; that wait has its own
         // WAKE_TIMEOUT_MS budget and must not count against the hardware timeout.
         watchdogJob = managerScope.launch {
-            var elapsedMs = 0L
-            while (elapsedMs < INIT_TIMEOUT_MS) {
-                delay(WATCHDOG_TICK_MS.milliseconds)
-                if (!awaitingWake) elapsedMs += WATCHDOG_TICK_MS
-            }
+            delay(INIT_TIMEOUT_MS.milliseconds)
             if (_state.value is ScannerState.Initializing) {
                 logError("$tag initialize() → Watchdog timed out after ${INIT_TIMEOUT_MS / 1000}s")
                 _state.value = ScannerState.Failed("Fingerprint reader did not respond. Please retry.")
@@ -276,21 +273,21 @@ internal class ScannerSessionManager(
         // Handle low power mode before reading the device state. Sleeping hardware only wakes on
         // finger contact — a power cycle will not do it — and waking first means the state read
         // below reflects live hardware instead of a device that is merely asleep.
-        if (isEitherReaderInLowPower()) {
-            logDebug("$tag performInitialization() → reader(s) in low power mode, waking before state check")
-            awaitReadersAwake()
-        } else if (_state.value is ScannerState.AwaitingWake) {
-            // initialize() seeded AwaitingWake but the readers woke before we got here.
-            _state.value = ScannerState.Initializing
-        }
-
+        /*  if (isEitherReaderInLowPower()) {
+              logDebug("$tag performInitialization() → reader(s) in low power mode, waking before state check")
+              awaitReadersAwake()
+          } else if (_state.value is ScannerState.AwaitingWake) {
+              // initialize() seeded AwaitingWake but the readers woke before we got here.
+              _state.value = ScannerState.Initializing
+          }
+  */
         val state0 = reader0.getDeviceState()
         val state1 = reader1.getDeviceState()
         logTiming("performInitialization() ▶ Device State - Before init, reader 0 - $state0")
         logTiming("performInitialization() ▶ Device State - Before init, reader 1 - $state1")
         logTiming("performInitialization() ▶ Device State - Before init, isInitialized - ${NBDevices.isInitialized()}")
 
-        when (aggregateDeviceState(state0, state1)) {
+        /*when (aggregateDeviceState(state0, state1)) {
             NBDeviceState.AWAKE -> {
                 logDebug("$tag performInitialization() → both readers AWAKE, verifying sessions only")
                 ensureReadersInitialized()
@@ -306,7 +303,9 @@ internal class ScannerSessionManager(
                 logDebug("$tag performInitialization() → reader(s) NOT_CONNECTED, full hardware init")
                 performFullHardwareInit()
             }
-        }
+        }*/
+
+        performFullHardwareInit()
 
         logTiming("performInitialization() ■ TOTAL ${elapsedSec(overallStart)}s")
     }

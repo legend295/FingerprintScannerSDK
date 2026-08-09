@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -30,6 +31,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.vectordrawable.graphics.drawable.Animatable2Compat
+import androidx.vectordrawable.graphics.drawable.AnimatedVectorDrawableCompat
 import com.github.legend295.fingerprintscanner.R
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.SphericalUtil
@@ -69,6 +72,7 @@ import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.Date
 import kotlin.time.Duration.Companion.milliseconds
+import androidx.core.view.isVisible
 
 /**
  * Refactored scanner activity.
@@ -110,6 +114,15 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private var btnCancel: AppCompatButton? = null
     private var ivScannerLeft: AppCompatImageView? = null
     private var ivScannerRight: AppCompatImageView? = null
+    private var ivLeftFingerGif: AppCompatImageView? = null
+    private var ivRightFingerGif: AppCompatImageView? = null
+
+    /**
+     * The running wake-prompt animations, held so their looping callbacks can be unregistered.
+     * Null whenever the prompt is hidden.
+     */
+    private var leftFingerAvd: AnimatedVectorDrawableCompat? = null
+    private var rightFingerAvd: AnimatedVectorDrawableCompat? = null
     private var tvScanFingerprints: AppCompatTextView? = null
     private var tvScanMessage: AppCompatTextView? = null
     private var messagesHolder: LinearLayout? = null
@@ -161,6 +174,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                     sessionManager.cancelScan()
                     dismissInitDialog()
                     cancelSession()
+                    ScannerApp.getInstance().sessionManager = null
                 }
 
                 Intent.ACTION_SCREEN_ON -> {
@@ -259,7 +273,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             ScannerApp.getInstance().sessionManager = sessionManager
         } else {
             sessionManager = ScannerApp.getInstance().sessionManager!!
-            // Clear stale terminal state (Success/Failed/Cancelled) BEFORE the StateFlow
+            // Clear stale terminal state (Success/Failed/Canceled) BEFORE the StateFlow
             // collector is registered below, so the first emission is Ready — not the
             // previous session's result, which would re-show the Registration Successful dialog.
             // Hardware correctness is verified separately by initializeHardware().
@@ -337,18 +351,18 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      * hardware and show the init dialog; see the [screenStateReceiver] field comment for why the
      * raw ACTION_SCREEN_ON broadcast is too early to do that safely.
      */
-  /*  override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && screenTurnedOff) {
-            screenTurnedOff = false
-            // Guard against a redundant reinit if onResume's own recovery check
-            // (areBothReadersAwake/checkSessionHealth) already kicked one off.
-            if (!isFinishing && sessionManager.state.value !is ScannerState.Initializing) {
-                logDebug("UpdatedScannerActivity :: window focus regained after screen on — reinitializing hardware")
-                initializeHardware()
-            }
-        }
-    }*/
+    /*  override fun onWindowFocusChanged(hasFocus: Boolean) {
+          super.onWindowFocusChanged(hasFocus)
+          if (hasFocus && screenTurnedOff) {
+              screenTurnedOff = false
+              // Guard against a redundant reinit if onResume's own recovery check
+              // (areBothReadersAwake/checkSessionHealth) already kicked one off.
+              if (!isFinishing && sessionManager.state.value !is ScannerState.Initializing) {
+                  logDebug("UpdatedScannerActivity :: window focus regained after screen on — reinitializing hardware")
+                  initializeHardware()
+              }
+          }
+      }*/
 
     override fun onDestroy() {
         super.onDestroy()
@@ -378,6 +392,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         btnCancel = findViewById(R.id.btnCancel)
         ivScannerLeft = findViewById(R.id.ivScannerLeft)
         ivScannerRight = findViewById(R.id.ivScannerRight)
+        ivLeftFingerGif = findViewById(R.id.ivLeftFingerGif)
+        ivRightFingerGif = findViewById(R.id.ivRightFingerGif)
         tvLeftQuality = findViewById(R.id.tvLeftQuality)
         tvRightQuality = findViewById(R.id.tvRightQuality)
         messagesHolder = findViewById(R.id.messagesHolder)
@@ -487,6 +503,12 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         if (!(state is ScannerState.Failed && sessionManager.isLowPowerEnabled)) {
             sleepPollJob?.cancel()
         }
+        // The finger animations belong to the wake prompt only — both states below route to it.
+        // Handled here so every other state hides (and stops) them without repeating the call.
+        setFingerAnimationsVisible(
+            state is ScannerState.AwaitingWake ||
+                    (state is ScannerState.Failed && sessionManager.isLowPowerEnabled)
+        )
         when (state) {
             is ScannerState.Idle -> {
                 setMessage(getString(R.string.initializing))
@@ -571,6 +593,9 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      */
     private fun handleFailedSleepMode(checkSessionAfterWake: Boolean = false) {
         resetFingerImages()
+        // renderState already covers the Failed path; this call is for onResume, which reaches
+        // here directly without a state change.
+        setFingerAnimationsVisible(true)
         setMessage("Device is in sleep mode. Please touch both finger sensors to wake them up.")
         setCancelButtonVisible(false)
         startSleepModePolling(checkSessionAfterWake)
@@ -600,6 +625,9 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                         initializeHardware()
                         return@launch
                     }
+                    // The readers woke without a state change, so renderState won't fire —
+                    // stop the animations here or they would keep animating behind "Start Scan".
+                    setFingerAnimationsVisible(false)
                     setMessage("Readers are ready to scan.")
                     setStartButton("Start Scan", visible = true)
                     return@launch
@@ -1404,6 +1432,79 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         runOnUiThread {
             if (readerNo == 0) tvLeftQuality?.text = "$pct%"
             else tvRightQuality?.text = "$pct%"
+        }
+    }
+
+    /**
+     * Shows or hides the two pointing-hand animations that accompany the low-power wake prompt.
+     *
+     * The [AnimatedVectorDrawableCompat] only runs while the views are visible: hiding clears the
+     * looping callback, stops the drawable and detaches it, so nothing animates off-screen.
+     *
+     * Calls that match the current visibility are ignored, so repeated renders of the same state
+     * don't restart the animation mid-cycle.
+     */
+    private fun setFingerAnimationsVisible(visible: Boolean) {
+        runOnUiThread {
+            val left = ivLeftFingerGif ?: return@runOnUiThread
+            val right = ivRightFingerGif ?: return@runOnUiThread
+            if (visible == (left.isVisible)) return@runOnUiThread
+
+            if (visible) {
+                left.visibility = View.VISIBLE
+                right.visibility = View.VISIBLE
+                leftFingerAvd = startFingerAnimation(left)
+                rightFingerAvd = startFingerAnimation(right)
+            } else {
+                stopFingerAnimation(left, leftFingerAvd)
+                stopFingerAnimation(right, rightFingerAvd)
+                leftFingerAvd = null
+                rightFingerAvd = null
+                left.visibility = View.GONE
+                right.visibility = View.GONE
+            }
+        }
+    }
+
+    /**
+     * Loads [R.drawable.avd_fingerpoint] into [view] and starts it on a loop.
+     *
+     * `avd_fingerpoint` declares no `repeatCount`, so it plays once and stops. The loop is driven
+     * by [Animatable2Compat.AnimationCallback.onAnimationEnd] restarting it — posted rather than
+     * called inline, because restarting an [AnimatedVectorDrawableCompat] from inside its own end
+     * callback is not supported and silently no-ops. The visibility check in the callback stops
+     * the loop dead if the view was hidden between the last frame and the post.
+     *
+     * @return The running drawable, kept so [stopFingerAnimation] can unregister its callback.
+     */
+    private fun startFingerAnimation(view: AppCompatImageView): AnimatedVectorDrawableCompat? =
+        runCatching {
+            val avd = AnimatedVectorDrawableCompat.create(this, R.drawable.avd_fingerpoint)
+                ?: return@runCatching null
+            view.setImageDrawable(avd)
+            avd.registerAnimationCallback(object : Animatable2Compat.AnimationCallback() {
+                override fun onAnimationEnd(drawable: Drawable?) {
+                    if (view.visibility != View.VISIBLE) return
+                    view.post { if (view.isVisible) avd.start() }
+                }
+            })
+            avd.start()
+            avd
+        }.onFailure {
+            logError("UpdatedScannerActivity :: finger animation failed: ${it.message}")
+        }.getOrNull()
+
+    /**
+     * Stops [avd] and detaches it from [view].
+     *
+     * [AnimatedVectorDrawableCompat.clearAnimationCallbacks] must come first — otherwise
+     * [stop] fires `onAnimationEnd`, which would immediately restart the loop.
+     */
+    private fun stopFingerAnimation(view: AppCompatImageView, avd: AnimatedVectorDrawableCompat?) {
+        runCatching {
+            avd?.clearAnimationCallbacks()
+            avd?.stop()
+            view.setImageDrawable(null)
         }
     }
 

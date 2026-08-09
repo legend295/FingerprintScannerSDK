@@ -30,6 +30,7 @@ import com.scanner.utils.NewRelicWrapper.logDebug
 import com.scanner.utils.NewRelicWrapper.logError
 import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
+import com.sun.jna.ptr.IntByReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -276,6 +277,7 @@ internal class FingerprintReaderWrapper(
                         trySend(event)
                     }
 
+                    val status = IntByReference() // maps to NBBiometricsStatus*
                     // Block the IO thread, canceled via invokeOnCancellation → cancelScan().
                     val extractResult = runBlockingSdk {
                         ctx.extract(
