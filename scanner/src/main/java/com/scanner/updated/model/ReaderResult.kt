@@ -17,7 +17,13 @@ import com.nextbiometrics.biometrics.NBBiometricsStatus
  * @param wsqPath         Absolute path of the WSQ-encoded fingerprint image saved to disk.
  * @param bitmapPath      Absolute path of the JPEG preview image saved to disk.
  * @param templatePath    Absolute path of the encrypted ISO-template (.dat) file saved to disk.
- * @param quality         NFIQ image quality score (1–5 where 1 is best; 0 if unavailable).
+ * @param quality         Template quality as reported by the extraction (higher is better;
+ *                        0 when the SDK did not populate it).
+ * @param livenessScore   Highest anti-spoof score seen during the pass, or 0 if the module
+ *                        never reported one. Compare against [livenessThreshold], not against
+ *                        any assumed maximum — the scale has no known ceiling.
+ * @param livenessThreshold  Anti-spoof cutoff actually programmed into this reader.
+ * @param fingerDetect    Highest finger-detect (coverage) value seen during the pass.
  */
 data class ReaderResult(
     val readerNo: Int,
@@ -27,4 +33,7 @@ data class ReaderResult(
     val bitmapPath: String?,
     val templatePath: String?,
     val quality: Int,
+    val livenessScore: Int = 0,
+    val livenessThreshold: Int = 0,
+    val fingerDetect: Int = 0,
 )

@@ -22,6 +22,7 @@ import com.nextbiometrics.devices.NBDeviceScanFormatInfo
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.devices.NBDeviceState
+import com.nextbiometrics.devices.NBDeviceType
 import com.nextbiometrics.system.NextBiometricsException
 import com.scanner.app.ScannerApp
 import com.scanner.updated.model.ReaderResult
@@ -85,48 +86,99 @@ internal class FingerprintReaderWrapper(
     // All are written on the SDK's preview-callback thread and read on the scan coroutine,
     // so each needs @Volatile for the read to see the write.
 
-    /** True only once [configureAntispoof] confirmed the device stored the parameters. */
+    /** True only once [configureAntispoof] programmed the device without throwing. */
     @Volatile
     private var antispoofActive = false
 
-    /** Threshold the device reports it is enforcing. Logged for tuning; not compared against. */
+    /** Anti-spoof cutoff actually programmed into this reader, from [chooseThreshold]. */
     @Volatile
-    private var activeAntispoofThreshold = REQUESTED_ANTISPOOF_THRESHOLD
+    private var activeAntispoofThreshold = ANTISPOOF_THRESHOLD_FALLBACK
 
     /**
-     * Lowest non-zero liveness score seen this scan pass, or [MAX_ANTISPOOF_THRESHOLD] if the
-     * device never reported one. **Diagnostic only — never used to reject a scan.**
+     * Highest liveness score seen this scan pass, or 0 if the module never reported one.
      *
-     * Neither NextBiometrics Android sample gates on this value: the one-finger sample never
-     * reads it, and the dual-reader sample only prints it. It also has no fixed scale — the two
-     * samples cap it at 1000 and 40000 respectively — and readers that do not implement
-     * anti-spoof report a flat 0, which is indistinguishable from a genuine spoof reading.
-     * The verdict comes from the SDK statuses in [isSpoofDetected] instead.
+     * Reported to the UI and logged for tuning; the accept/reject decision belongs to the
+     * device, which applies [activeAntispoofThreshold] internally and answers through
+     * `NBBiometricsStatus.SPOOF_DETECTED`. A peak is kept rather than the last value because
+     * the frames trailing a capture say nothing about the finger that was captured.
      */
     @Volatile
-    private var spoofScore = MAX_ANTISPOOF_THRESHOLD
+    private var peakLiveness = 0
 
-    /** True when the device itself flagged a preview frame as a spoof. */
+    /** Highest finger-detect (coverage) value seen this scan pass. */
     @Volatile
-    private var deviceReportedSpoof = false
+    private var peakDetect = 0
+
+    /** Most recent liveness/detect pair, for the live preview readout. */
+    @Volatile
+    private var lastLiveness = 0
+
+    @Volatile
+    private var lastDetect = 0
+
+    /** Set when the pad kept reporting a finger on an empty platen — see [ScannerEvent.SensorDirty]. */
+    @Volatile
+    private var sensorLooksDirty = false
 
     companion object {
-        const val MAX_ANTISPOOF_THRESHOLD = 1000
+        /**
+         * Anti-spoof cutoff used when `getLivenessThreshold` is unsupported on the attached
+         * module. Measured on the Telpo TPS900's FAP20 modules as the 1.0 % probe point.
+         */
+        private const val ANTISPOOF_THRESHOLD_FALLBACK = 32768
 
         /**
-         * Anti-spoof threshold handed to the device, which applies it internally: it treats a scan
-         * as live when the liveness score exceeds this value, and reports the verdict through
-         * `NBBiometricsStatus.SPOOF_DETECTED` / `NBDeviceScanStatus.SPOOF`. Pass `-1` to have the
-         * SDK restore its own default.
+         * How hard to push anti-spoof.
          *
-         * 363 is the default from the NextBiometrics one-finger Android sample. This value only
-         * tunes the device's own decision — nothing in this class compares against it.
+         * `getLivenessThreshold(pct)` takes a percentage in 1.0f..3.3f and returns the raw score
+         * a presentation must reach. The SDK guide never says which end is stricter, so
+         * [chooseThreshold] probes [ANTISPOOF_PROBE_POINTS] and ranks what the device actually
+         * returns. Measured on the FAP20 modules the threshold *rises* with the percentage:
+         *
+         *     1.0%=32768  1.5%=33966  2.0%=34816  2.5%=35475  3.0%=36014  3.3%=36295
+         *
+         * Genuine fingers on that hardware measured 36233..45462 and the two modules are not
+         * equivalent — the second reads 4–6k lower than the first on the same hand, so a single
+         * global threshold is set by the weaker one. STRICT (36295) rejected a real finger that
+         * peaked at 36233. Play-Doh fakes measured 4577..24416, so PERMISSIVE sits near the
+         * middle of the gap between the worst fake and the weakest genuine finger.
          */
-        private const val REQUESTED_ANTISPOOF_THRESHOLD = 363
+        enum class Strictness { STRICT, BALANCED, PERMISSIVE }
+
+        val ANTISPOOF_STRICTNESS = Strictness.PERMISSIVE
+
+        val ANTISPOOF_PROBE_POINTS = listOf(1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.3f)
 
         private const val CONFIGURE_ANTISPOOF = 108
         private const val CONFIGURE_ANTISPOOF_THRESHOLD = 109
         private const val ENABLE_ANTISPOOF = 1
+
+        /**
+         * NB_DEVICE_PARAMETER_SUBTRACT_BACKGROUND — the anti-latent defence. The device
+         * subtracts a background reference so a print revived from residue on the platen
+         * cannot be re-read as a live finger.
+         */
+        private const val CONFIGURE_SUBTRACT_BACKGROUND = 105
+        private const val ENABLE_ANTI_LATENT = 1
+        private const val DISABLE_ANTI_LATENT = 0
+
+        /** Modules supporting one-time background capture, per the vendor sample. */
+        private val ONE_TIME_BG_TYPES = setOf(
+            NBDeviceType.NB2020U, NBDeviceType.NB2023U, NBDeviceType.NB2033U,
+            NBDeviceType.NB65200U, NBDeviceType.NB65210S,
+        )
+
+        /** Preview fires far faster than a screen can redraw; throttle to ~12 fps. */
+        private const val PREVIEW_MIN_INTERVAL_MS = 80L
+
+        /** How long "lift your finger" can persist before a soiled pad is the likelier cause. */
+        private const val DIRTY_SENSOR_AFTER_MS = 6_000L
+
+        /** Resting finger-detect above this with no finger present means a soiled pad. */
+        private const val DIRTY_SENSOR_DETECT = 60
+
+        /** Detect at or above this means the pad was fully covered. */
+        private const val FULL_CONTACT_DETECT = 255
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -217,10 +269,15 @@ internal class FingerprintReaderWrapper(
                 logError("$tag doInit() → no supported scan formats")
                 return false
             }
-            scanFormatInfo = formats[0]
+            scanFormatInfo = chooseFormat(formats)
 
             runCatching { configureAntispoof() }
                 .onFailure { Log.w(tag, "Anti-spoof not supported on this device: ${it.message}") }
+
+            // Anti-latent needs the platen empty for its one-time background capture, so it can
+            // only run here at init — never between scans, by which point a finger has touched it.
+            runCatching { configureAntiLatent(dev) }
+                .onFailure { Log.w(tag, "Anti-latent setup failed: ${it.message}") }
 
             isInitialized = true
             logDebug("$tag doInit() → OK (format=${scanFormatInfo?.formatType})")
@@ -301,7 +358,7 @@ internal class FingerprintReaderWrapper(
 
                 // ── Registration: extract biometric template ───────────────────
                 ScanningType.REGISTRATION -> {
-                    resetSpoofState()
+                    resetScanSignals()
 
                     trySend(ScannerEvent.Message(readerNo, "Place your finger on the sensor.", false))
 
@@ -310,34 +367,41 @@ internal class FingerprintReaderWrapper(
                         trySend(event)
                     }
 
-                    val status = IntByReference() // maps to NBBiometricsStatus*
                     // Block the IO thread, canceled via invokeOnCancellation → cancelScan().
                     val extractResult = runBlockingSdk {
-                        ctx.extract(
-                            NBBiometricsTemplateType.ISO,
-                            NBBiometricsFingerPosition.UNKNOWN,
-                            scanFormatInfo,
-                            previewListener,
-                        )
+                        clearStaleOperation(ctx)
+                        withScanThreadPriority {
+                            ctx.extract(
+                                NBBiometricsTemplateType.ISO,
+                                NBBiometricsFingerPosition.UNKNOWN,
+                                scanFormatInfo,
+                                previewListener,
+                            )
+                        }
                     }
 
                     ensureActive()
 
                     send(ScannerEvent.ExtractionDone(readerNo, extractResult.status))
 
-                    logSpoofDiagnostics(extractResult.status)
-
                     // Anti-spoof is checked before the generic status branch below: SPOOF_DETECTED
-                    // is an NBBiometricsStatus like any other, so "extraction failed" would
-                    // otherwise swallow it and report a presentation attack as a capture error.
-                    if (isSpoofDetected(extractResult.status)) {
-                        send(ScannerEvent.SpoofDetected(readerNo))
-                        close(ScannerSessionManager.SpoofDetectedException("Spoof detected on reader $readerNo"))
+                    // and LATENT_DETECTED are NBBiometricsStatus values like any other, so
+                    // "extraction failed" would otherwise swallow them and report a presentation
+                    // attack as an ordinary capture error.
+                    spoofRejection(extractResult.status)?.let { rejection ->
+                        send(rejection)
+                        close(ScannerSessionManager.SpoofDetectedException(rejection.detail))
+                        return@callbackFlow
+                    }
+
+                    assessScanOutcome(extractResult.status)?.let { dirty ->
+                        send(dirty)
+                        close(ScannerSessionManager.SensorDirtyException(dirty.detail))
                         return@callbackFlow
                     }
 
                     if (extractResult.status != NBBiometricsStatus.OK) {
-                        val msg = "Extraction failed: ${extractResult.status}"
+                        val msg = describeExtractFailure(extractResult.status)
                         send(ScannerEvent.Message(readerNo, msg, true))
                         close(Exception(msg))
                         return@callbackFlow
@@ -345,13 +409,11 @@ internal class FingerprintReaderWrapper(
 
                     val template = extractResult.template
 
-                    // Compute NFIQ quality from the last preview image.
-                    previewListener.lastImage?.let { img ->
-                        quality = NBDevice.GetImageQuality(
-                            img, scanFormatInfo!!.width, scanFormatInfo!!.height,
-                            500, NBDeviceImageQualityAlgorithm.NFIQ,
-                        )
-                    }
+                    // Quality comes off the template, NOT NBDevice.GetImageQuality: that static
+                    // helper returns plausible NFIQ values but leaves the SDK's global last-error
+                    // set, and the next SDK call reads it — which is what made every extract after
+                    // the first successful capture fail with "Invalid operation".
+                    quality = runCatching { template.quality }.getOrDefault(0)
 
                     val timestamp = System.currentTimeMillis()
 
@@ -369,10 +431,14 @@ internal class FingerprintReaderWrapper(
                     wsqPath = saveRawFile(wsqBytes, dir = savePath, timestamp = timestamp)
                     wsqPath?.let { send(ScannerEvent.FileSaved(readerNo, it, ScannerEvent.FileSaved.FileType.WSQ)) }
 
-                    // Save JPEG preview bitmap.
+                    // Save JPEG preview bitmap. lastImage is only ever set from a frame whose
+                    // buffer covered the full format, so a null here means the conversion itself
+                    // failed — skip the JPEG rather than aborting a capture that already produced
+                    // a valid template.
                     previewListener.lastImage?.let { img ->
-                        val bmp = convertToArgbBitmap(img)
-                        bitmapPath = saveBitmapJpeg(bmp, savePath, timestamp)
+                        convertToArgbBitmap(img)?.let { bmp ->
+                            bitmapPath = saveBitmapJpeg(bmp, savePath, timestamp)
+                        } ?: logError("$tag preview image could not be converted — skipping JPEG")
                         bitmapPath?.let {
                             send(
                                 ScannerEvent.FileSaved(
@@ -425,6 +491,9 @@ internal class FingerprintReaderWrapper(
                                 bitmapPath = bitmapPath,
                                 templatePath = templatePath,
                                 quality = quality,
+                                livenessScore = peakLiveness,
+                                livenessThreshold = activeAntispoofThreshold,
+                                fingerDetect = peakDetect,
                             )
                         )
                     )
@@ -432,7 +501,7 @@ internal class FingerprintReaderWrapper(
 
                 // ── Verification: identify against stored templates ─────────────
                 ScanningType.VERIFICATION -> {
-                    resetSpoofState()
+                    resetScanSignals()
 
                     // Load all stored encrypted templates for this user.
                     val templates = loadStoredTemplates(ctx, templateDir)
@@ -453,14 +522,17 @@ internal class FingerprintReaderWrapper(
                     val verifyCtx = biometricsCtx
                     Log.d(tag, "Starting identify with ${templates.size} stored templates…")
                     val identifyResult = runBlockingSdk {
-                        verifyCtx.identify(
-                            NBBiometricsTemplateType.ISO,
-                            NBBiometricsFingerPosition.UNKNOWN,
-                            scanFormatInfo,
-                            previewListener,
-                            templates.iterator(),
-                            NBBiometricsSecurityLevel.HIGH,
-                        )
+                        clearStaleOperation(verifyCtx)
+                        withScanThreadPriority {
+                            verifyCtx.identify(
+                                NBBiometricsTemplateType.ISO,
+                                NBBiometricsFingerPosition.UNKNOWN,
+                                scanFormatInfo,
+                                previewListener,
+                                templates.iterator(),
+                                NBBiometricsSecurityLevel.HIGH,
+                            )
+                        }
                     }
 
                     ensureActive()
@@ -470,14 +542,18 @@ internal class FingerprintReaderWrapper(
                     )
                     send(ScannerEvent.IdentificationDone(readerNo, identifyResult))
 
-                    logSpoofDiagnostics(identifyResult.status)
-
                     // Must run before the status branch below, which has no SPOOF_DETECTED case and
                     // would let the flow complete normally — surfacing a presentation attack to the
                     // user as "No match found" once the activity sees a non-OK identify status.
-                    if (isSpoofDetected(identifyResult.status)) {
-                        send(ScannerEvent.SpoofDetected(readerNo))
-                        close(ScannerSessionManager.SpoofDetectedException("Spoof detected on reader $readerNo"))
+                    spoofRejection(identifyResult.status)?.let { rejection ->
+                        send(rejection)
+                        close(ScannerSessionManager.SpoofDetectedException(rejection.detail))
+                        return@callbackFlow
+                    }
+
+                    assessScanOutcome(identifyResult.status)?.let { dirty ->
+                        send(dirty)
+                        close(ScannerSessionManager.SensorDirtyException(dirty.detail))
                         return@callbackFlow
                     }
 
@@ -488,7 +564,7 @@ internal class FingerprintReaderWrapper(
                         NBBiometricsStatus.MATCH_NOT_FOUND ->
                             "No matching fingerprint found."
 
-                        else -> "Identification status: ${identifyResult.status}"
+                        else -> describeExtractFailure(identifyResult.status)
                     }
                     send(ScannerEvent.Message(readerNo, statusMsg, identifyResult.status != NBBiometricsStatus.OK))
 
@@ -502,6 +578,9 @@ internal class FingerprintReaderWrapper(
                                 bitmapPath = null,
                                 templatePath = null,
                                 quality = quality,
+                                livenessScore = peakLiveness,
+                                livenessThreshold = activeAntispoofThreshold,
+                                fingerDetect = peakDetect,
                             )
                         )
                     )
@@ -602,6 +681,64 @@ internal class FingerprintReaderWrapper(
      * @param block  The blocking SDK call that returns a result of type [T].
      * @return       The result of [block].
      */
+    /**
+     * Clears an operation the SDK still thinks is in flight before starting a new one.
+     *
+     * `extract()` returns ERROR_INVALID_OPERATION when the device believes a previous operation
+     * is still running — which happens after a cancelled pass whose native call had not yet
+     * unwound. Checking and cancelling costs one call and turns a hard failure into a retry the
+     * user never sees.
+     */
+    private fun clearStaleOperation(ctx: NBBiometricsContext) {
+        val running = runCatching { ctx.isOperationRunning }.getOrNull()
+        if (running != true) return
+        Log.w(tag, "$tag operation still running; cancelling before scan")
+        runCatching { ctx.cancelOperation() }
+        Thread.sleep(300)
+    }
+
+    /**
+     * Runs [block] at audio thread priority.
+     *
+     * SPI/USB image readout starves at normal priority — the vendor sample raises thread
+     * priority for exactly this reason. The previous priority is always restored.
+     */
+    private fun <T> withScanThreadPriority(block: () -> T): T {
+        val previous = runCatching {
+            android.os.Process.getThreadPriority(android.os.Process.myTid())
+        }.getOrNull()
+        runCatching {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+        }
+        return try {
+            block()
+        } finally {
+            previous?.let { runCatching { android.os.Process.setThreadPriority(it) } }
+        }
+    }
+
+    /**
+     * Turns a non-OK extract/identify status into something an operator can act on, rather than
+     * leaking the raw enum name into the UI.
+     */
+    private fun describeExtractFailure(status: NBBiometricsStatus?): String = when (status) {
+        NBBiometricsStatus.TIMEOUT ->
+            "No finger detected. Place both fingers on the sensors and hold still."
+
+        NBBiometricsStatus.BAD_QUALITY ->
+            "Fingerprint image was too poor to use. Clean the sensor, press firmly and try again."
+
+        NBBiometricsStatus.TOO_FEW_MINUTIAE ->
+            "Not enough fingerprint detail captured. Cover more of the sensor and try again."
+
+        NBBiometricsStatus.NEED_MORE_SAMPLES ->
+            "More samples needed. Keep your finger on the sensor until the scan completes."
+
+        NBBiometricsStatus.CANCELED -> "Scan cancelled."
+
+        else -> "Scan failed (${status ?: "unknown"}). Please try again."
+    }
+
     private suspend fun <T> runBlockingSdk(block: () -> T): T =
         suspendCancellableCoroutine { cont ->
             cont.invokeOnCancellation {
@@ -631,38 +768,85 @@ internal class FingerprintReaderWrapper(
         var lastImage: ByteArray? = null
             private set
 
+        /** When the pad first started insisting a finger was present. 0 = not currently. */
+        private var notRemovedSince = 0L
+        private var lastEmit = 0L
+
         override fun preview(event: NBBiometricsScanPreviewEvent) {
-            // The device's own per-frame verdict. Independent of the score, and the only anti-spoof
-            // signal available when the SDK rejects a frame before scoring it.
             val scanStatus = event.scanStatus
-            if (scanStatus == NBDeviceScanStatus.SPOOF || scanStatus == NBDeviceScanStatus.SPOOF_DETECTED) {
-                deviceReportedSpoof = true
-            }
-            // Diagnostic only — never a gate. See [spoofScore] for why.
-            if (antispoofActive && event.fingerDetectValue > 0) {
-                val score = event.livenessScoreValue
-                if (score > 0) spoofScore = minOf(spoofScore, score)
+            val fmt = event.format
+            val liveness = event.livenessScoreValue
+            val detect = event.fingerDetectValue
+
+            lastLiveness = liveness
+            lastDetect = detect
+            if (liveness > peakLiveness) peakLiveness = liveness
+            if (detect > peakDetect) peakDetect = detect
+
+            // NOTE: a SPOOF status here is deliberately NOT treated as a decision. Preview fires
+            // continuously while the finger is still settling onto the platen, and those early
+            // partial-contact frames routinely read as a spoof on a perfectly real finger.
+            // Latching on the first one rejected genuine fingers outright. The authoritative
+            // answer is the extract/identify result; this only tints the on-screen panel.
+            val frameLooksSpoofed = scanStatus == NBDeviceScanStatus.SPOOF ||
+                    scanStatus == NBDeviceScanStatus.SPOOF_DETECTED
+            val terminal = frameLooksSpoofed ||
+                    scanStatus == NBDeviceScanStatus.OK ||
+                    scanStatus == NBDeviceScanStatus.DONE
+
+            // The device will not begin a scan until it has seen the platen go empty. If it keeps
+            // insisting a finger is there while none is, the pad is dirty: sweat and oil build up
+            // over a run of captures and read as a permanent partial finger.
+            if (scanStatus == NBDeviceScanStatus.NOT_REMOVED || scanStatus == NBDeviceScanStatus.LIFT_FINGER) {
+                val now = System.currentTimeMillis()
+                if (notRemovedSince == 0L) notRemovedSince = now
+                if (now - notRemovedSince > DIRTY_SENSOR_AFTER_MS) sensorLooksDirty = true
+            } else {
+                notRemovedSince = 0L
             }
 
-            event.image?.let { img ->
-                lastImage = img
-                val bmp = convertToArgbBitmap(img)
-                emit(
-                    ScannerEvent.PreviewFrame(
-                        readerNo = readerNo,
-                        image = img,
-                        bitmap = bmp,
-                        status = event.scanStatus,
-                        previewType = previewType,
-                    )
-                )
+            // Hold on to the most recent frame that actually carried a full image — this is what
+            // the saved JPEG/BMP is written from. A short buffer is rejected rather than stored:
+            // it would blow up bitmap conversion later, away from the frame that caused it.
+            val fullImage = event.image?.takeIf { px ->
+                fmt != null && px.size >= fmt.width * fmt.height
             }
+            if (fullImage != null) lastImage = fullImage
+
+            // Preview fires far faster than a screen can usefully redraw. Throttle, but never
+            // drop a terminal frame — that is the one the operator most needs to see.
+            //
+            // The pixel check deliberately does NOT gate this. Status-only frames carry the
+            // liveness numbers and the spoof tint, and a terminal SPOOF/DONE frame often has no
+            // image at all; dropping it here would leave the panel showing a mid-placement
+            // reading. Stamping lastEmit before such a drop would also steal the next real
+            // frame's slot, so the throttle clock is only advanced when a frame is emitted.
+            val now = System.currentTimeMillis()
+            if (!terminal && now - lastEmit < PREVIEW_MIN_INTERVAL_MS) return
+            lastEmit = now
+
+            emit(
+                ScannerEvent.PreviewFrame(
+                    readerNo = readerNo,
+                    image = fullImage,
+                    bitmap = fullImage?.let { convertToArgbBitmap(it) },
+                    status = scanStatus,
+                    previewType = previewType,
+                    width = fmt?.width ?: 0,
+                    height = fmt?.height ?: 0,
+                    fingerDetect = detect,
+                    liveness = liveness,
+                    thresholdLiveness = activeAntispoofThreshold,
+                    spoof = frameLooksSpoofed,
+                )
+            )
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Private: session management
-    // ──────────────────────────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────────────────────────
+// Private: session management
+// ──────────────────────────────────────────────────────────────────────────
 
     /**
      * Opens the security session on the device according to the device's [NBDeviceSecurityModel].
@@ -730,77 +914,183 @@ internal class FingerprintReaderWrapper(
     }
 
     /**
-     * Enables anti-spoofing on the device and records whether it actually took effect.
+     * Programs anti-spoof (and, where supported, anti-latent) into the device.
      *
-     * Only a subset of NextBiometrics readers support anti-spoof — per the SDK documentation:
-     * NB-2023-S-UID, NB-2023-U-UID, NB-3023-U-UID, NB-65200-U and NB-65210-S. On any other device
-     * `setParameter` throws or is ignored, so both values are read back and [antispoofActive] is
-     * set only when the device confirms them. No scan is ever treated as spoofed unless that flag
-     * is true, which keeps unsupported hardware out of the spoof paths entirely.
+     * The threshold comes from the device itself via [chooseThreshold] rather than a hardcoded
+     * constant, because the scale differs per module. Once set, the *device* applies it and
+     * answers through `NBBiometricsStatus.SPOOF_DETECTED` — nothing in this class compares
+     * scores against it.
      *
-     * May throw; [doInit] catches and logs.
+     * May throw; callers catch and log.
      */
     private fun configureAntispoof() {
         antispoofActive = false
         val dev = device ?: return
-
+        val threshold = chooseThreshold(dev)
         dev.setParameter(CONFIGURE_ANTISPOOF.toLong(), ENABLE_ANTISPOOF)
-        dev.setParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong(), REQUESTED_ANTISPOOF_THRESHOLD)
-
-        val enabled = dev.getParameter(CONFIGURE_ANTISPOOF.toLong())
-        if (enabled != ENABLE_ANTISPOOF) {
-            logError("$tag anti-spoof not applied — parameter reads back as $enabled")
-            return
-        }
-
-        // The device is the single source of truth for the threshold: the score check compares
-        // against what it reports here, so a value it clamped or defaulted cannot drift from ours.
-        val applied = dev.getParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong())
-        activeAntispoofThreshold =
-            if (applied in 0..MAX_ANTISPOOF_THRESHOLD) applied else REQUESTED_ANTISPOOF_THRESHOLD
+        dev.setParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong(), threshold)
+        activeAntispoofThreshold = threshold
         antispoofActive = true
-        logDebug("$tag anti-spoof enabled (threshold=$activeAntispoofThreshold)")
+        logDebug("$tag anti-spoof on, threshold=$threshold ($ANTISPOOF_STRICTNESS)")
     }
 
     /**
-     * Combined anti-spoof verdict for the scan that just finished, across all three signals the
-     * SDK exposes: the operation status, the device's per-frame scan status, and the liveness
-     * score. Any one of them is enough to reject the scan.
+     * Background subtraction — the anti-latent defence, which stops a print revived from
+     * residue on the platen being read as a live finger.
      *
-     * Gated on [antispoofActive] so a device without anti-spoof support — where none of these
-     * signals are populated — can never produce a false spoof.
+     * Setting parameter 105 is only half of it: the device then subtracts a background
+     * reference that has to be captured with `scanBGImage()` while the platen is EMPTY.
+     * Enabling the parameter without that reference lets the first scan of a run succeed and
+     * makes every scan after it fail with "Invalid operation" — a finger has touched the sensor
+     * by then and there is no background to subtract against. So this runs once at init, and if
+     * the background capture fails the parameter is turned back off rather than left enabled
+     * against a reference that does not exist.
+     */
+    private fun configureAntiLatent(dev: NBDevice) {
+        val type = runCatching { dev.type }.getOrNull()
+        if (type !in ONE_TIME_BG_TYPES) {
+            logDebug("$tag anti-latent skipped: $type does not support one-time background capture")
+            return
+        }
+        val format = scanFormatInfo
+        if (format == null) {
+            Log.w(tag, "$tag anti-latent skipped: no scan format to capture a background with")
+            return
+        }
+        runCatching {
+            dev.setParameter(CONFIGURE_SUBTRACT_BACKGROUND.toLong(), ENABLE_ANTI_LATENT)
+            val bg = dev.scanBGImage(format)
+            logDebug("$tag anti-latent on, background captured (${bg?.status})")
+        }.onFailure {
+            Log.w(tag, "Anti-latent background capture failed (${it.message}); disabling it")
+            runCatching { dev.setParameter(CONFIGURE_SUBTRACT_BACKGROUND.toLong(), DISABLE_ANTI_LATENT) }
+        }
+    }
+
+    /**
+     * Picks the scan format to capture at.
+     *
+     * The native formats on these modules are 385 dpi and only some are 500; the SDK also
+     * publishes an upscaled 500 dpi twin of each. ISO/IEC 19794-4 and ANSI/NIST are written
+     * around 500 dpi, so `formats[0]` — whatever the device happened to list first — was a
+     * gamble that could enrol at 385. Prefer 500 dpi, then the largest capture area.
+     */
+    private fun chooseFormat(formats: Array<out NBDeviceScanFormatInfo>): NBDeviceScanFormatInfo {
+        logDebug("$tag supported scan formats: " + formats.joinToString {
+            "${it.format}/${it.formatType} ${it.width}x${it.height}@${it.horizontalResolution}dpi"
+        })
+        val chosen = formats.filter { it.horizontalResolution >= 500 }
+            .maxByOrNull { it.width.toLong() * it.height }
+            ?: formats.maxByOrNull { it.width.toLong() * it.height }
+            ?: formats[0]
+        logDebug(
+            "$tag scanning at ${chosen.width}x${chosen.height} @${chosen.horizontalResolution}dpi " +
+                    "(${chosen.format}/${chosen.formatType})"
+        )
+        return chosen
+    }
+
+    /**
+     * Probe the documented percentage range and rank the thresholds the device actually
+     * returns, instead of assuming which end of 1.0f..3.3f is stricter.
+     */
+    private fun chooseThreshold(device: NBDevice): Int {
+        val probes = ANTISPOOF_PROBE_POINTS.mapNotNull { pct ->
+            runCatching { pct to device.getLivenessThreshold(pct) }.getOrNull()
+        }
+        if (probes.isEmpty()) {
+            Log.w(tag, "getLivenessThreshold unsupported on this module; using fallback")
+            return ANTISPOOF_THRESHOLD_FALLBACK
+        }
+        Log.i(tag, "liveness threshold curve: " + probes.joinToString { "${it.first}%=${it.second}" })
+
+        val ranked = probes.map { it.second }.distinct().sorted()
+        return when (ANTISPOOF_STRICTNESS) {
+            Strictness.STRICT -> ranked.last()
+            Strictness.PERMISSIVE -> ranked.first()
+            Strictness.BALANCED -> ranked[ranked.size / 2]
+        }
+    }
+
+    /**
+     * Builds the anti-spoof rejection for a finished pass, or null if the presentation passed.
+     *
+     * The verdict is the *result* status and nothing else. Spoof surfaces at two layers with
+     * different enums — `NBDeviceScanStatus.SPOOF` at device level during preview,
+     * `NBBiometricsStatus.SPOOF_DETECTED` at biometrics level in the result — and only the
+     * latter is the device's considered answer. Preview frames are mid-placement samples and
+     * are used for the on-screen tint alone.
      *
      * @param status  Status returned by the `extract` or `identify` call that just completed.
      */
-    private fun isSpoofDetected(status: NBBiometricsStatus?): Boolean {
-        if (status == NBBiometricsStatus.SPOOF_DETECTED) return true
-        return antispoofActive && deviceReportedSpoof
+    private fun spoofRejection(status: NBBiometricsStatus?): ScannerEvent.SpoofDetected? = when (status) {
+        NBBiometricsStatus.LATENT_DETECTED -> ScannerEvent.SpoofDetected(
+            readerNo = readerNo,
+            kind = ScannerEvent.SpoofDetected.SpoofKind.LATENT_PRINT,
+            detail = "Latent print detected — that is residue left on the sensor, not a live " +
+                    "finger. Wipe the pad with a dry cloth and scan again.",
+        )
+
+        NBBiometricsStatus.SPOOF_DETECTED -> ScannerEvent.SpoofDetected(
+            readerNo = readerNo,
+            kind = ScannerEvent.SpoofDetected.SpoofKind.FAKE_FINGER,
+            detail = buildString {
+                append("Fake finger detected. Liveness $peakLiveness, needed $activeAntispoofThreshold")
+                if (activeAntispoofThreshold > peakLiveness) {
+                    append(" (short by ${activeAntispoofThreshold - peakLiveness})")
+                }
+                append('.')
+                // Liveness on a thermal sensor tracks heat transfer, so a real finger resting
+                // lightly scores like a poor conductor. Say so, because the operator otherwise
+                // has no way to tell a light press from a genuine rejection.
+                if (peakDetect >= FULL_CONTACT_DETECT) {
+                    append(" Contact area was full, so if this was a real finger press down firmly and hold still.")
+                }
+            },
+        )
+
+        else -> null
     }
 
     /**
-     * Clears the per-scan anti-spoof signals and re-applies the device parameters.
+     * Clears the per-scan signals and re-applies the anti-spoof parameters.
      *
      * Both NextBiometrics Android samples call their `enableSpoof()` immediately before every
      * `extract()` / `identify()` rather than once at init, so the same is done here — configuring
      * only in [doInit] is not enough to guarantee the setting is live for a given scan.
      */
-    private fun resetSpoofState() {
-        spoofScore = MAX_ANTISPOOF_THRESHOLD
-        deviceReportedSpoof = false
+    private fun resetScanSignals() {
+        peakLiveness = 0
+        peakDetect = 0
+        lastLiveness = 0
+        lastDetect = 0
+        sensorLooksDirty = false
         runCatching { configureAntispoof() }
             .onFailure { Log.w(tag, "Anti-spoof re-apply failed: ${it.message}") }
     }
 
-    /** Logs the anti-spoof signals for the pass that just ran. Diagnostic only. */
-    private fun logSpoofDiagnostics(status: NBBiometricsStatus?) {
-        if (!antispoofActive) {
-            logDebug("$tag anti-spoof inactive — no spoof signals collected")
-            return
-        }
-        val observed = if (spoofScore == MAX_ANTISPOOF_THRESHOLD) "none" else spoofScore.toString()
+    /**
+     * Logs the anti-spoof signals for the pass that just ran, and flags a soiled pad.
+     *
+     * A TIMEOUT paired with a high resting finger-detect means the platen never looked empty,
+     * so the device never started a scan — a dirty pad rather than an absent user.
+     *
+     * @return A [ScannerEvent.SensorDirty] when the pad looks soiled, otherwise null.
+     */
+    private fun assessScanOutcome(status: NBBiometricsStatus?): ScannerEvent.SensorDirty? {
         logDebug(
-            "$tag anti-spoof: status=$status, deviceReportedSpoof=$deviceReportedSpoof, " +
-                    "liveness=$observed (threshold=$activeAntispoofThreshold)"
+            "$tag scan outcome: status=$status antispoof=$antispoofActive " +
+                    "liveness(last=$lastLiveness peak=$peakLiveness threshold=$activeAntispoofThreshold) " +
+                    "detect(last=$lastDetect peak=$peakDetect)"
+        )
+        val dirtyByTimeout = status == NBBiometricsStatus.TIMEOUT && lastDetect > DIRTY_SENSOR_DETECT
+        if (!dirtyByTimeout && !sensorLooksDirty) return null
+
+        Log.w(tag, "$tag sensor looks dirty: resting detect=$lastDetect (clean reads under $DIRTY_SENSOR_DETECT)")
+        return ScannerEvent.SensorDirty(
+            readerNo = readerNo,
+            detail = "Reader ${readerNo + 1} never saw an empty sensor — wipe both pads with a " +
+                    "dry cloth, then try again.",
         )
     }
 
@@ -834,9 +1124,9 @@ internal class FingerprintReaderWrapper(
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Private: template persistence
-    // ──────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
+// Private: template persistence
+// ──────────────────────────────────────────────────────────────────────────
 
     /**
      * Loads all encrypted ISO-template files from [templateDir], decrypts them, and returns
@@ -914,9 +1204,9 @@ internal class FingerprintReaderWrapper(
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Private: image saving helpers
-    // ──────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
+// Private: image saving helpers
+// ──────────────────────────────────────────────────────────────────────────
 
     /**
      * Writes raw image bytes (e.g. WSQ) to a file.
@@ -1022,9 +1312,9 @@ internal class FingerprintReaderWrapper(
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Private: image conversion
-    // ──────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
+// Private: image conversion
+// ──────────────────────────────────────────────────────────────────────────
 
     /**
      * Converts a raw grayscale byte array from the sensor into an ARGB_8888 [Bitmap].
@@ -1032,24 +1322,25 @@ internal class FingerprintReaderWrapper(
      *
      * @param image  Grayscale image bytes with dimensions from [scanFormatInfo].
      */
-    private fun convertToArgbBitmap(image: ByteArray): Bitmap {
-        val fmt = scanFormatInfo
-        val pixels = IntBuffer.allocate(image.size)
-        for (byte in image) {
-            val grey = byte.toInt() and 0xFF
+    private fun convertToArgbBitmap(image: ByteArray): Bitmap? {
+        val fmt = scanFormatInfo ?: return null
+        val pixelCount = fmt.width * fmt.height
+        // The buffer is allocated from image.size but read back at width × height, so a short
+        // frame would index past the end inside createBitmap — on the SDK's callback thread,
+        // where the crash has no useful stack. A long one is fine to trim.
+        if (fmt.width <= 0 || fmt.height <= 0 || image.size < pixelCount) return null
+
+        val pixels = IntBuffer.allocate(pixelCount)
+        for (i in 0 until pixelCount) {
+            val grey = image[i].toInt() and 0xFF
             pixels.put(Color.argb(255, grey, grey, grey))
         }
-        return Bitmap.createBitmap(
-            pixels.array(),
-            fmt?.width ?: 0,
-            fmt?.height ?: 0,
-            Bitmap.Config.ARGB_8888,
-        )
+        return Bitmap.createBitmap(pixels.array(), fmt.width, fmt.height, Bitmap.Config.ARGB_8888)
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Private: utilities
-    // ──────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
+// Private: utilities
+// ──────────────────────────────────────────────────────────────────────────
 
     /** Returns a filename-safe timestamp string like "2024-05-17-14-32-01". */
     private fun buildTimestampedFileName(): String {

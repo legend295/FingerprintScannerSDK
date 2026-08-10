@@ -54,7 +54,6 @@ import com.scanner.utils.constants.Constant
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
-import com.scanner.utils.fetchingLocationDialog
 import com.scanner.utils.fetchingUserDB
 import com.scanner.utils.location.LocationWrapper
 import com.scanner.utils.readersInitializationDialog
@@ -110,6 +109,14 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private var tvStatusRight: AppCompatTextView? = null
     private var tvLeftQuality: AppCompatTextView? = null
     private var tvRightQuality: AppCompatTextView? = null
+    private var tvLeftLiveness: AppCompatTextView? = null
+    private var tvRightLiveness: AppCompatTextView? = null
+
+    /**
+     * Set when a spoof or dirty-pad outcome has labelled a reader's panel, so the
+     * [ScannerState.Failed] render leaves that label alone. Cleared at the start of each pass.
+     */
+    private var readerNoticePinned = false
     private var btnStart: AppCompatButton? = null
     private var btnCancel: AppCompatButton? = null
     private var ivScannerLeft: AppCompatImageView? = null
@@ -126,7 +133,6 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private var tvScanFingerprints: AppCompatTextView? = null
     private var tvScanMessage: AppCompatTextView? = null
     private var messagesHolder: LinearLayout? = null
-    private var scrollView: ScrollView? = null
     private var lastMessageView: TextView? = null
 
     // ── Dialogs ───────────────────────────────────────────────────────────────
@@ -149,6 +155,12 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     // ── Location ──────────────────────────────────────────────────────────────
     private val locationHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var locationTimeoutRunnable: Runnable? = null
+
+    /**
+     * Set once the Firestore user record exists, so a GPS fix arriving after that write knows
+     * there is something to patch. Registration only — verification writes no record.
+     */
+    private var userRecordSaved = false
 
     // ── Screen on/off tracking ────────────────────────────────────────────────
     // The POS hardware drops the USB fingerprint reader sessions whenever the screen turns
@@ -396,8 +408,9 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         ivRightFingerGif = findViewById(R.id.ivRightFingerGif)
         tvLeftQuality = findViewById(R.id.tvLeftQuality)
         tvRightQuality = findViewById(R.id.tvRightQuality)
+        tvLeftLiveness = findViewById(R.id.tvLeftLiveness)
+        tvRightLiveness = findViewById(R.id.tvRightLiveness)
         messagesHolder = findViewById(R.id.messagesHolder)
-        scrollView = findViewById(R.id.scrollView1)
         tvScanFingerprints = findViewById(R.id.tvScanFingerprints)
         tvScanMessage = findViewById(R.id.tvScanMessage)
     }
@@ -568,8 +581,13 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                     } else {
                         state.reason
                     }
-                    setReaderMessage(0, "")
-                    setReaderMessage(1, "")
+                    // A spoof or dirty-pad failure already labelled the offending reader's panel
+                    // and tinted it red; clearing here would erase the only per-reader indication
+                    // of which sensor rejected the presentation.
+                    if (!readerNoticePinned) {
+                        setReaderMessage(0, "")
+                        setReaderMessage(1, "")
+                    }
                     setMessage(displayMessage)
                     setStartButton("Retry", visible = true)
                     setCancelButtonVisible(false)
@@ -704,6 +722,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             is ScannerEvent.PreviewFrame -> {
                 renderPreviewBitmap(event.readerNo, event.bitmap, event.status)
                 handlePreviewStatus(event.status, event.previewType, event.readerNo)
+                renderLiveness(event.readerNo, event.liveness, event.thresholdLiveness, event.spoof)
             }
 
             is ScannerEvent.ExtractionDone -> {
@@ -752,8 +771,21 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             }
 
             is ScannerEvent.SpoofDetected -> {
-                logError("UpdatedScannerActivity :: Spoof detected on reader ${event.readerNo}")
-                // UI is handled by renderState(ScannerState.Failed) which fires immediately after.
+                logError("UpdatedScannerActivity :: ${event.kind} on reader ${event.readerNo}: ${event.detail}")
+                // Pin the offending reader's panel red and name the reason there; the shared
+                // status line and Retry button come from renderState(Failed) right after.
+                readerNoticePinned = true
+                setReaderMessage(event.readerNo, spoofHeadline(event.kind))
+                tintLiveness(event.readerNo, R.color.liveness_error)
+                appendMessage(event.detail, isError = true)
+            }
+
+            is ScannerEvent.SensorDirty -> {
+                logError("UpdatedScannerActivity :: dirty sensor on reader ${event.readerNo}")
+                readerNoticePinned = true
+                setReaderMessage(event.readerNo, "Sensor may be dirty")
+                tintLiveness(event.readerNo, R.color.liveness_warn)
+                appendMessage(event.detail, isError = true)
             }
 
             is ScannerEvent.ReaderError -> {
@@ -789,6 +821,9 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
 
             is ScannerState.Failed -> {
                 clearSessionData()
+                // Retry after a failure — including a spoof or dirty-pad rejection, whose
+                // explanation is in the log and must not linger behind the next attempt.
+                clearMessages()
                 when {
                     sessionManager.isLowPowerEnabled && sleepModeTrack <= 3 -> {
                         // Readers are sleeping but sessions are still open.
@@ -839,6 +874,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
 
             is ScannerState.Cancelled -> {
                 clearSessionData()
+                clearMessages()
                 sleepModeTrack = 0
                 initializeHardware()
             }
@@ -877,9 +913,11 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      */
     private fun beginScanPass(storagePath: String) {
         clearSessionData()
+        clearMessages()
         setMessage("Initializing sensor, please wait…")
         tvStatusLeft?.text = ""
         tvStatusRight?.text = ""
+        resetLivenessDisplay()
         setCancelButtonVisible(true)
         setStartButtonVisible(false)
         sessionManager.startScan(storagePath)
@@ -898,9 +936,14 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      * @param r1  Result from reader 1.
      */
     private fun handleScanSuccess(r0: ReaderResult, r1: ReaderResult) {
+        // The panels keep showing liveness — the number certification actually tests — so the
+        // final peak replaces the last live frame rather than being overwritten by quality.
+        renderFinalLiveness(r0)
+        renderFinalLiveness(r1)
+
         if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
-            updateQualityDisplay(r0.readerNo, r0.quality)
-            updateQualityDisplay(r1.readerNo, r1.quality)
+            reportQuality(r0)
+            reportQuality(r1)
 
             if (r0.quality > 0 && r1.quality > 0) {
                 val leftPct = qualityToPercent(r0.quality)
@@ -1093,43 +1136,81 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * Entry point called after location and user-lookup pre-checks complete.
-     * Requests GPS and checks for an existing user record in Firestore before
-     * calling [initializeHardware].
+     * Starts the GPS fetch and the pre-scan checks **at the same time**.
+     *
+     * Location is best-effort metadata — nothing in the scan or verification decision depends
+     * on it — so making the operator watch a dialog for up to 30 seconds before the hardware
+     * even begins initialising cost real time on every launch. The fetch now runs in the
+     * background and [startLocationFetch] patches the coordinates into Firestore if they land
+     * after the user record was written.
      */
     private fun startLocationThenInitialize() {
         if (!skipLocation && hasLocationPermission()) {
-            fetchLocationThenInitialize()
+            startLocationFetch()
+            performPreScanChecks()
         } else if (!skipLocation) {
+            // Permission dialog is modal, so there is nothing to run alongside it. The launcher
+            // callback starts both halves once the user answers.
             requestLocationPermissions()
         } else {
+            // skipLocation: drop any fix left behind by a previous session rather than
+            // attributing it to this user — `location` is static and outlives the activity.
+            location = null
             performPreScanChecks()
         }
     }
 
     /**
-     * Fetches the device's current GPS position with a 30-second timeout.
-     * Proceeds to [performPreScanChecks] regardless of whether a location was obtained.
+     * Fetches the device's GPS position in the background, with a 30-second timeout.
+     *
+     * Never blocks initialisation and shows no dialog. Because it now races the Firestore write
+     * in [saveUserToFirestore], a fix that arrives after that write is patched onto the record
+     * by [patchStoredLocation] — otherwise a slow fix would silently store `[null, null]`.
      */
-    private fun fetchLocationThenInitialize() {
-        val dialog = fetchingLocationDialog(scanningOptions?.themeOptions) {}
+    private fun startLocationFetch() {
+        // Clear the previous session's fix first: `location` is a companion-object field that
+        // outlives the activity, so a stale value would otherwise be attributed to this user.
+        location = null
         var settled = false
 
         fun settle() {
             if (settled) return
             settled = true
             locationTimeoutRunnable?.let { locationHandler.removeCallbacks(it) }
+            locationTimeoutRunnable = null
             locationWrapper.stopUpdates()
-            dialog.dismiss()
-            performPreScanChecks()
         }
 
-        locationTimeoutRunnable = Runnable { settle() }
+        locationTimeoutRunnable = Runnable {
+            logDebug("UpdatedScannerActivity :: location fetch timed out after 30s")
+            settle()
+        }
         locationHandler.postDelayed(locationTimeoutRunnable!!, 30_000L)
 
         locationWrapper.getLocation { latLng ->
             location = latLng
             settle()
+            if (latLng != null) patchStoredLocation(latLng)
+        }
+    }
+
+    /**
+     * Writes coordinates onto an already-saved user record.
+     *
+     * Only fires when the fix arrived after [saveUserToFirestore] had run — detected via
+     * [userRecordSaved], which that method sets. A no-op for verification (no record is
+     * written) and when Firebase is skipped entirely.
+     */
+    private fun patchStoredLocation(latLng: LatLng) {
+        if (skipFirebaseActions || !userRecordSaved) return
+        val uid = scanningOptions?.uniqueId ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            userRepository.updateUserFields(
+                uid,
+                mapOf("gpsCoordinates" to arrayListOf(latLng.latitude, latLng.longitude)),
+            ).onSuccess {
+                logDebug("UpdatedScannerActivity :: late GPS fix patched onto user record")
+            }
         }
     }
 
@@ -1292,6 +1373,11 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             }
         }
 
+        // Snapshot the fix as it stands now: the background GPS fetch may complete between
+        // building this record and the write landing, and only a record written *without*
+        // coordinates needs patching afterwards.
+        val fixAtWrite = location
+
         val user = User(
             uniqueId = uid,
             deviceId = getAndroidDeviceId(),
@@ -1306,13 +1392,21 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             fingerPrintCloudPath = arrayListOf(),
             fingerPrintSyncedOnCloud = false,
             timestamp = Date(),
-            gpsCoordinates = arrayListOf(location?.latitude, location?.longitude),
+            gpsCoordinates = arrayListOf(fixAtWrite?.latitude, fixAtWrite?.longitude),
             customObject = extraFields,
         )
 
         lifecycleScope.launch(Dispatchers.IO) {
             userRepository.saveUser(user)
-                .onSuccess { currentUser = user; logDebug("UpdatedScannerActivity :: user saved to Firestore") }
+                .onSuccess {
+                    currentUser = user
+                    userRecordSaved = true
+                    logDebug("UpdatedScannerActivity :: user saved to Firestore")
+                    // The GPS fetch runs alongside this write, so a fix can land while it is in
+                    // flight — in which case the record above went out with nulls and needs the
+                    // coordinates adding. Only when it was written without them.
+                    if (fixAtWrite == null) location?.let { patchStoredLocation(it) }
+                }
                 .onFailure { logError("UpdatedScannerActivity :: user save failed: ${it.message}") }
         }
     }
@@ -1360,7 +1454,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
 
     /** Appends a message row to the scrollable message log. */
     private fun appendMessage(text: String, isError: Boolean) {
-        runOnUiThread {
+        /*runOnUiThread {
             val textView = TextView(applicationContext).apply {
                 if (isError && context != null) setTextColor(
                     ContextCompat.getColor(
@@ -1372,9 +1466,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             }
             messagesHolder?.addView(textView)
             lastMessageView = textView
-            // Scroll to the latest message after the next layout pass.
-            scrollView?.postDelayed({ scrollView?.fullScroll(View.FOCUS_DOWN) }, 100)
-        }
+        }*/
     }
 
     /** Sets the Start button text and visibility. */
@@ -1407,14 +1499,17 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      * @param readerNo  0 = left, 1 = right.
      * @param bitmap    The preview bitmap to display.
      */
-    private fun renderPreviewBitmap(readerNo: Int, bitmap: Bitmap, status: NBDeviceScanStatus) {
+    private fun renderPreviewBitmap(readerNo: Int, bitmap: Bitmap?, status: NBDeviceScanStatus) {
         runOnUiThread {
             val imageView = if (readerNo == 0) ivScannerLeft else ivScannerRight
             if (status == NBDeviceScanStatus.PUT_FINGER_ON_SENSOR || status == NBDeviceScanStatus.WAIT_FOR_SENSOR_INITIALIZATION) {
                 imageView?.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_android_fingerprint_grey))
-            } else {
-                imageView?.setImageBitmap(bitmap)
+                return@runOnUiThread
             }
+            // A status-only frame carries no pixels. Leave whatever was last drawn in place —
+            // blanking here would make the panel flicker every time the sensor reports progress
+            // without an image, and the frame's liveness numbers are rendered separately.
+            bitmap?.let { imageView?.setImageBitmap(it) }
         }
     }
 
@@ -1426,13 +1521,100 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      * @param readerNo  0 = left, 1 = right.
      * @param nfiqScore Raw NFIQ quality score.
      */
-    private fun updateQualityDisplay(readerNo: Int, nfiqScore: Int) {
-        if (nfiqScore <= 0) return
-        val pct = qualityToPercent(nfiqScore)
-        runOnUiThread {
-            if (readerNo == 0) tvLeftQuality?.text = "$pct%"
-            else tvRightQuality?.text = "$pct%"
+    /**
+     * Reports a finished reader's template quality into the message log.
+     *
+     * Quality no longer takes the headline label — that shows liveness now — but it still
+     * gates the low-quality retry, so the operator needs to see the number that caused it.
+     */
+    private fun reportQuality(result: ReaderResult) {
+        if (result.quality <= 0) return
+        appendMessage(
+            "Reader ${result.readerNo + 1} template quality: ${qualityToPercent(result.quality)}%",
+            isError = false,
+        )
+    }
+
+    /** Pins a finished reader's panel to the peak liveness measured during the pass. */
+    private fun renderFinalLiveness(result: ReaderResult) {
+        renderLiveness(
+            readerNo = result.readerNo,
+            liveness = result.livenessScore,
+            threshold = result.livenessThreshold,
+            spoof = false,
+        )
+    }
+
+    /**
+     * Renders one reader's live anti-spoof readout: the headline percentage on the quality
+     * label, and the raw score against the threshold underneath the status line.
+     *
+     * The percentage is **of the pass threshold**, not of an assumed full scale. The liveness
+     * score has no known ceiling — genuine fingers have measured above 44000 against a 32768
+     * threshold — so inventing a maximum would misreport every reading. 100% here means "at or
+     * above the bar the device will actually accept".
+     *
+     * @param readerNo   0 = left, 1 = right.
+     * @param liveness   Raw liveness score from this preview frame.
+     * @param threshold  Cutoff programmed into that reader; 0 when anti-spoof is inactive.
+     * @param spoof      Whether this individual frame read as a spoof (tint only — the verdict
+     *                   comes from the scan result, not from preview frames).
+     */
+    private fun renderLiveness(readerNo: Int, liveness: Int, threshold: Int, spoof: Boolean) {
+        // Anti-spoof unsupported or not yet programmed: leave the labels to the quality flow
+        // rather than showing a meaningless 0%.
+        if (threshold <= 0) return
+
+        val pct = ((liveness.toLong() * 100) / threshold).toInt().coerceIn(0, 100)
+        val colour = when {
+            spoof -> R.color.liveness_error
+            liveness >= threshold -> R.color.liveness_ok
+            else -> R.color.liveness_warn
         }
+        runOnUiThread {
+            val quality = if (readerNo == 0) tvLeftQuality else tvRightQuality
+            val detail = if (readerNo == 0) tvLeftLiveness else tvRightLiveness
+            quality?.text = getString(R.string.liveness_percent, pct)
+            quality?.setTextColor(ContextCompat.getColor(this, colour))
+            detail?.text = getString(R.string.liveness_detail, liveness, threshold)
+            detail?.setTextColor(ContextCompat.getColor(this, colour))
+        }
+    }
+
+    /** Forces one reader's liveness labels to [colourRes], for a terminal outcome. */
+    private fun tintLiveness(readerNo: Int, colourRes: Int) {
+        runOnUiThread {
+            val colour = ContextCompat.getColor(this, colourRes)
+            if (readerNo == 0) {
+                tvLeftQuality?.setTextColor(colour)
+                tvLeftLiveness?.setTextColor(colour)
+            } else {
+                tvRightQuality?.setTextColor(colour)
+                tvRightLiveness?.setTextColor(colour)
+            }
+        }
+    }
+
+    /** Clears both readers' liveness labels back to their neutral state. */
+    private fun resetLivenessDisplay() {
+        readerNoticePinned = false
+        runOnUiThread {
+            val neutral = ContextCompat.getColor(this, R.color.liveness_neutral)
+            listOf(tvLeftLiveness, tvRightLiveness).forEach {
+                it?.text = ""
+                it?.setTextColor(neutral)
+            }
+            listOf(tvLeftQuality, tvRightQuality).forEach {
+                it?.text = ""
+                it?.setTextColor(ContextCompat.getColor(this, R.color.black))
+            }
+        }
+    }
+
+    /** Short headline for the offending reader's panel. */
+    private fun spoofHeadline(kind: ScannerEvent.SpoofDetected.SpoofKind): String = when (kind) {
+        ScannerEvent.SpoofDetected.SpoofKind.FAKE_FINGER -> "Fake finger detected"
+        ScannerEvent.SpoofDetected.SpoofKind.LATENT_PRINT -> "Latent print detected"
     }
 
     /**
@@ -1510,9 +1692,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
 
     /** Resets both fingerprint preview images to the default placeholder drawable. */
     private fun resetFingerImages() {
+        resetLivenessDisplay()
         runOnUiThread {
-            tvLeftQuality?.text = ""
-            tvRightQuality?.text = ""
             tvStatusLeft?.text = ""
             tvStatusRight?.text = ""
             ivScannerLeft?.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_android_fingerprint_grey))
@@ -1542,6 +1723,22 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         resetFingerImages()
         setReaderMessage(0, "")
         setReaderMessage(1, "")
+        clearMessages()
+    }
+
+    /**
+     * Empties the scrollable message log.
+     *
+     * Called when the user starts a fresh attempt — Retry after a spoof or dirty-sensor
+     * rejection included. Those outcomes append an explanation naming the offending reader,
+     * and leaving it on screen behind the next attempt reads as though the new scan was
+     * rejected too.
+     *
+     * Deliberately NOT part of [clearSessionData]: [handleLowQuality] calls that after
+     * [reportQuality] has logged the figures that explain the retry, and wiping them there
+     * would delete the reason while asking the user to scan again.
+     */
+    private fun clearMessages() {
         runOnUiThread {
             messagesHolder?.removeAllViews()
             lastMessageView = null
@@ -1564,9 +1761,15 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         // fresh scan start or after a full reinit.
     }
 
-    /** Returns the NFIQ quality score (1–5, lower is better) as a 0–100% percentage. */
-    private fun qualityToPercent(nfiqScore: Int): Int =
-        (((5.0 - nfiqScore.toDouble()) / 4.0) * 100.0).toInt()
+    /**
+     * Returns the template quality as a 0–100% figure.
+     *
+     * This is the quality the extraction itself reports (higher is better), not NFIQ — the
+     * reader stopped calling `NBDevice.GetImageQuality` because that helper leaves the SDK's
+     * global last-error set, which made the *next* extract fail with "Invalid operation".
+     * The scale is already percentage-like, so this only clamps it.
+     */
+    private fun qualityToPercent(templateQuality: Int): Int = templateQuality.coerceIn(0, 100)
 
     // ──────────────────────────────────────────────────────────────────────────
     // Dialog management
@@ -1727,9 +1930,12 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private val locationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
             if (results.values.all { it }) {
-                fetchLocationThenInitialize()
+                startLocationFetch()
+                performPreScanChecks()
             } else {
-                // Location denied — still initialise (location is best-effort).
+                // Location denied — still initialise (location is best-effort). Clear any fix
+                // left by a previous session so it is not attributed to this user.
+                location = null
                 performPreScanChecks()
             }
         }

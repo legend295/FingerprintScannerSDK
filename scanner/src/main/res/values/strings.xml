@@ -28,4 +28,8 @@
     <string name="firmware_upgrade_progress">Firmware Upgrade In-Progress Do not Back press or close the application</string>
     <string name="downloading_fingerprints">Downloading Fingerprints</string>
     <string name="fingerprints_download_is_in_progress_please_wait">Fingerprints download is in progress.\nPlease wait…</string>
+
+    <!-- Liveness is shown as a percentage OF THE PASS THRESHOLD, not of a full scale. -->
+    <string name="liveness_percent">%1$d%%</string>
+    <string name="liveness_detail">Liveness %1$d / %2$d</string>
 </resources>

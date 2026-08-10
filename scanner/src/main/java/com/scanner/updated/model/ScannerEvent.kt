@@ -23,17 +23,29 @@ sealed class ScannerEvent {
     /**
      * Live preview frame captured by the sensor during an active scan.
      *
+     * [image] and [bitmap] are **nullable**: the sensor emits status-only frames that carry no
+     * pixels, and the anti-spoof numbers on those frames still matter. In particular a terminal
+     * SPOOF or DONE frame may arrive without an image, and it is the one that turns the panel
+     * red — so the readout must not depend on pixels being present. Consumers should leave the
+     * previous image on screen when [bitmap] is null rather than blanking the view.
+     *
      * @param readerNo      Which physical reader (0 or 1) produced this frame.
-     * @param image         Raw grayscale byte array from the sensor.
-     * @param bitmap        ARGB_8888 bitmap ready for display.
+     * @param image         Raw grayscale byte array from the sensor, or null on a status-only frame.
+     * @param bitmap        ARGB_8888 bitmap ready for display, or null when there are no pixels.
      * @param status        Current scan status at the time of this preview.
      * @param previewType   Whether this frame came from an extraction or identification pass.
      */
     data class PreviewFrame(
         val readerNo: Int,
-        val image: ByteArray,
-        val bitmap: Bitmap,
+        val width: Int,
+        val height: Int,
+        val image: ByteArray?,
+        val bitmap: Bitmap?,
         val status: NBDeviceScanStatus,
+        val fingerDetect: Int,
+        val liveness: Int,
+        val thresholdLiveness: Int,
+        val spoof: Boolean,
         val previewType: PreviewListenerType,
     ) : ScannerEvent() {
         override fun equals(other: Any?): Boolean {
@@ -97,13 +109,46 @@ sealed class ScannerEvent {
     ) : ScannerEvent()
 
     /**
-     * Liveness check (anti-spoof) failed for this reader.
+     * The device rejected the presentation as not a live finger.
      * When emitted, [com.scanner.updated.reader.ScannerSessionManager] will cancel the
      * other reader immediately.
      *
-     * @param readerNo  The reader that detected the spoofed finger.
+     * This is only ever raised from the *result* of `extract`/`identify` — never from a
+     * preview frame. Preview fires continuously while a finger settles onto the platen, and
+     * those early partial-contact frames routinely read as a spoof on a perfectly real
+     * finger; latching on the first one rejects genuine users.
+     *
+     * @param readerNo  The reader that rejected the presentation.
+     * @param kind      Whether a fake finger or a latent (residue) print was detected.
+     * @param detail    Operator-facing explanation, including the measured liveness figures.
      */
-    data class SpoofDetected(val readerNo: Int) : ScannerEvent()
+    data class SpoofDetected(
+        val readerNo: Int,
+        val kind: SpoofKind,
+        val detail: String,
+    ) : ScannerEvent() {
+        /** Which anti-spoof defence rejected the scan. */
+        enum class SpoofKind {
+            /** A fake finger: the liveness score fell below the device's threshold. */
+            FAKE_FINGER,
+
+            /** A latent print — residue revived on the platen rather than a finger. */
+            LATENT_PRINT,
+        }
+    }
+
+    /**
+     * The sensor pad appears soiled: it keeps reporting a finger on an empty platen, so the
+     * device will never begin a scan. Sweat and oil build up over a run of captures and read
+     * as a permanent partial finger, which no amount of lifting clears.
+     *
+     * @param readerNo  The reader whose pad looks dirty.
+     * @param detail    Operator-facing instruction.
+     */
+    data class SensorDirty(
+        val readerNo: Int,
+        val detail: String,
+    ) : ScannerEvent()
 
     /**
      * The device is currently in low-power (sleep) mode and cannot accept scan commands.

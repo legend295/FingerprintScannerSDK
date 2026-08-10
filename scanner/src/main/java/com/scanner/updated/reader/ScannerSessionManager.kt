@@ -572,8 +572,16 @@ internal class ScannerSessionManager(
             when (event) {
                 is ScannerEvent.SpoofDetected -> {
                     sibling.cancel()
-                    logError("$tag collectReader() → Spoof detected on reader ${event.readerNo}")
-                    throw SpoofDetectedException("Spoof detected on reader ${event.readerNo}")
+                    logError("$tag collectReader() → ${event.kind} on reader ${event.readerNo}: ${event.detail}")
+                    // The detail carries the measured liveness figures and the operator's next
+                    // step; it becomes ScannerState.Failed.reason and is shown verbatim.
+                    throw SpoofDetectedException(event.detail)
+                }
+
+                is ScannerEvent.SensorDirty -> {
+                    sibling.cancel()
+                    logError("$tag collectReader() → dirty sensor on reader ${event.readerNo}")
+                    throw SensorDirtyException(event.detail)
                 }
 
                 is ScannerEvent.DeviceInSleepMode -> {
@@ -877,6 +885,13 @@ internal class ScannerSessionManager(
      * [coroutineScope] cancels the sibling reader without special-casing [CancellationException].
      */
     class SpoofDetectedException(message: String) : Exception(message)
+
+    /**
+     * Thrown when a reader's pad appears soiled — it kept reporting a finger on an empty
+     * platen, so the device never began a scan. Same handling as [SpoofDetectedException]:
+     * a plain [Exception] so the sibling reader is cancelled without special-casing.
+     */
+    class SensorDirtyException(message: String) : Exception(message)
 
     companion object {
         private const val INIT_TIMEOUT_MS = 30_000L
