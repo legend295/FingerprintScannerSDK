@@ -1,10 +1,19 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.FingerprintScannerSDK" parent="Theme.Material3.DayNight.NoActionBar">
-<!--    <style name="Base.Theme.FingerprintScannerSDK" parent="@android:style/Theme.Holo.Light">-->
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/waxd_primary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/waxd_accent</item>
+        <item name="android:colorBackground">@color/waxd_bg</item>
+        <item name="android:statusBarColor" tools:targetApi="l">@color/waxd_bg</item>
+        <item name="android:textColorPrimary">@color/waxd_text</item>
     </style>
 
-    <style name="Theme.FingerprintScannerSDK" parent="Base.Theme.FingerprintScannerSDK" />
+    <!--
+        Declared on the child rather than on Base so it applies in day and night alike — the
+        values-night copy redefines Base from scratch and would otherwise drop it.
+    -->
+    <style name="Theme.FingerprintScannerSDK" parent="Base.Theme.FingerprintScannerSDK">
+        <item name="alertDialogTheme">@style/AlertStyle</item>
+    </style>
 </resources>

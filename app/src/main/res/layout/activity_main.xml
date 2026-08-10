@@ -8,13 +8,37 @@
     tools:context=".MainActivity">
 
     <androidx.appcompat.widget.AppCompatImageView
+        android:id="@+id/ivLogo"
         android:layout_width="match_parent"
-        android:layout_height="200dp"
+        android:layout_height="wrap_content"
         android:scaleType="fitCenter"
-        android:src="@mipmap/ic_app_icon"
+        android:src="@drawable/waxd_logo"
         app:layout_constraintBottom_toTopOf="@id/btnRegistration"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <androidx.appcompat.widget.AppCompatTextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Biometric Enrolment &amp; Verification"
+        android:textColor="@color/black"
+        android:textSize="18sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/ivLogo" />
+
+    <androidx.appcompat.widget.AppCompatImageView
+        android:id="@+id/btnSettings"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="12dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/settings_content_description"
+        android:padding="12dp"
+        android:src="@drawable/ic_settings"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
     <androidx.core.widget.ContentLoadingProgressBar
@@ -57,15 +81,30 @@
         app:layout_constraintTop_toBottomOf="@id/btnRegistration"
         app:layout_constraintVertical_bias=".8" />
 
+    <Button
+        android:id="@+id/btnHistory"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="30dp"
+        android:layout_marginTop="15sp"
+        android:layout_marginEnd="30dp"
+        android:background="@drawable/bg_round_button"
+        android:text="@string/history_button"
+        android:textSize="20sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btnVerification" />
+
     <androidx.appcompat.widget.AppCompatTextView
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin"
+        android:visibility="gone"
         app:layout_constraintBottom_toTopOf="@id/tvVersion"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/btnVerification"
+        app:layout_constraintTop_toBottomOf="@id/btnHistory"
         app:layout_constraintVertical_bias="0"
         tools:text="@string/app_name" />
 
@@ -74,8 +113,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin"
-        android:textColor="@color/black"
         android:gravity="center"
+        android:textColor="@color/black"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"

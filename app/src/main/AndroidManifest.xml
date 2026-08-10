@@ -6,15 +6,15 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_app_icon"
-        android:label="Waxd"
+        android:icon="@mipmap/ic_launcher"
+        android:label="WAXD NIBSS"
         android:roundIcon="@mipmap/ic_app_icon_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.FingerprintScannerSDK"
         tools:targetApi="31">
+<!--            android:theme="@style/Theme.AppCompat"-->
         <activity
             android:name=".MainActivity"
-            android:theme="@style/Theme.AppCompat"
             android:windowSoftInputMode="adjustResize"
             android:exported="true">
             <intent-filter>
@@ -23,6 +23,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- No android:theme override: MaterialSwitch is a Material3 widget and resolves its
+             style from materialSwitchStyle, which only a Theme.Material3.* theme defines. The
+             application theme already is one; overriding it with a MaterialComponents (M2)
+             theme left the switch with showText on and no thumb text, crashing in onMeasure. -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings"
+            android:parentActivityName=".MainActivity"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:label="@string/history"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- Exports are staged into external files and shared from there; a file:// URI would
+             throw FileUriExposedException on Android 7+. See res/xml/file_paths.xml for why
+             internal storage is deliberately not covered. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

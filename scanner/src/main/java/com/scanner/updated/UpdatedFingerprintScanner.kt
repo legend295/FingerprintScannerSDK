@@ -16,6 +16,7 @@ import com.scanner.utils.builder.BuilderOptions
 import com.scanner.utils.builder.ThemeOptions
 import com.scanner.utils.constants.Constant.CUSTOM_OBJECT
 import com.scanner.utils.constants.Constant.SCANNING_OPTIONS
+import com.scanner.updated.reader.FingerprintReaderWrapper
 import com.scanner.utils.enums.ScanningType
 import org.json.JSONObject
 import java.io.File
@@ -149,7 +150,59 @@ class UpdatedFingerprintScanner(
         repository.deleteCloudTemplatesForUser(uniqueId)
 
     /**
-     * Uploads any locally stored template files that have not yet been synced to Firebase Storage.
+     * Lists every unique ID that has registration templates stored on this device.
+     *
+     * The `verifications/` subdirectory is excluded — it holds per-transaction captures, not
+     * registered identities.
+     *
+     * @param context Any valid [Context] used to resolve `filesDir`.
+     */
+    fun localRegisteredIds(context: Context): List<String> =
+        (context.filesDir.listFiles { f ->
+            f.isDirectory && f.name != FingerprintReaderWrapper.VERIFICATIONS_DIR
+        } ?: emptyArray())
+            .filter { dir ->
+                dir.listFiles { f -> f.name.endsWith(FingerprintReaderWrapper.TEMPLATE_SUFFIX) }
+                    ?.isNotEmpty() == true
+            }
+            .map { it.name }
+            .sorted()
+
+    /**
+     * Removes every trace of one [uniqueId]: its templates and verification captures on this
+     * device, its Firebase Storage files, and its Firestore user document.
+     *
+     * Scoped to that ID alone — nothing else in the project is touched. There is no undo, so
+     * callers should confirm with the operator first.
+     *
+     * @param context  Any valid [Context] used to resolve `filesDir`.
+     * @param uniqueId The identifier to purge.
+     * @return A human-readable summary of what was removed.
+     */
+    suspend fun purge(context: Context, uniqueId: String): String {
+        val localFiles = listOf(
+            File(context.filesDir, uniqueId),
+            File(File(context.filesDir, FingerprintReaderWrapper.VERIFICATIONS_DIR), uniqueId),
+        ).sumOf { dir ->
+            if (!dir.isDirectory) {
+                0
+            } else {
+                val removed = dir.listFiles()?.count { it.delete() } ?: 0
+                dir.delete()
+                removed
+            }
+        }
+
+        val cloudFiles = repository.deleteCloudTemplatesForUser(uniqueId).getOrDefault(0)
+        val docDeleted = repository.deleteUser(uniqueId).isSuccess
+
+        return "$localFiles local file(s), $cloudFiles cloud file(s), " +
+                if (docDeleted) "user record removed" else "user record NOT removed"
+    }
+
+    /**
+     * Uploads any locally stored files that have not yet been synced to Firebase Storage —
+     * fingerprint templates first, then any raw BMP exports still owed to the cloud.
      *
      * This is a best-effort operation: partial failures are logged internally but do not cause
      * this function to throw. Call this from a background-safe coroutine scope (e.g.
@@ -158,7 +211,7 @@ class UpdatedFingerprintScanner(
      * @param context Any valid [Context] used to resolve the local storage directory.
      */
     suspend fun syncPendingUploads(context: Context) {
-        repository.syncPendingUploads(File(context.filesDir.absolutePath))
+        repository.syncAllPendingUploads(File(context.filesDir.absolutePath))
     }
 
     // -----------------------------------------------------------------------------------------
@@ -300,6 +353,30 @@ class UpdatedFingerprintScanner(
          */
         fun uploadBmpToFirebase(enable: Boolean): Builder {
             options.uploadBmpToFirebase = enable
+            return this
+        }
+
+        /**
+         * When `true`, the same fingerprints may be registered under more than one unique ID.
+         *
+         * Default `false`, which makes registration compare the freshly captured fingers
+         * against every other unique ID's templates held on this device and refuse a match.
+         * Turn it on for demos where one person's fingers stand in for several identities.
+         */
+        fun allowDuplicateFingerprints(allow: Boolean): Builder {
+            options.allowDuplicateFingerprints = allow
+            return this
+        }
+
+        /**
+         * When `true`, the fingerprints that authorised a **successful** verification are
+         * saved under `verifications/<uniqueId>/`. Default: `false`.
+         *
+         * This keeps a biometric per transaction rather than per identity, so storage grows
+         * without bound — leave it off unless the evidence trail is actually required.
+         */
+        fun saveVerificationCaptures(enable: Boolean): Builder {
+            options.saveVerificationCaptures = enable
             return this
         }
 

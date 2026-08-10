@@ -4,4 +4,21 @@
     <color name="black">#FF000000</color>
     <color name="gray">#A6A6A6</color>
     <color name="green">#00AB4D</color>
+
+    <!-- Settings screen -->
+    <color name="settings_hint">#6E6E6E</color>
+    <color name="settings_divider">#E0E0E0</color>
+    <color name="settings_danger">#C62828</color>
+    <color name="settings_ok">#1B9E4B</color>
+
+    <color name="waxd_bg">#0B0E14</color>
+    <color name="waxd_surface">#151A23</color>
+    <color name="waxd_primary">#00C389</color>
+    <color name="waxd_primary_dark">#00A473</color>
+    <color name="waxd_accent">#2D7FF9</color>
+    <color name="waxd_text">#F5F7FA</color>
+    <color name="waxd_text_muted">#8C97A8</color>
+    <color name="waxd_ok">#00C389</color>
+    <color name="waxd_warn">#F5A623</color>
+    <color name="waxd_error">#FF5C5C</color>
 </resources>

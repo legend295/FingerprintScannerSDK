@@ -4,4 +4,42 @@
     <string name="start_registration">Start Registration</string>
     <string name="verification">Transaction/Verification</string>
     <string name="add_user">Add User</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="settings_content_description">Settings</string>
+    <string name="allow_duplicates">Allow the same fingerprints on different IDs</string>
+    <string name="allow_duplicates_hint">Off by default \u2014 a duplicate registration is what a registry should refuse. Turn on when one person\'s fingers must stand in for several test identities. Compares against templates held on this device only.</string>
+    <string name="save_verification_captures">Save the fingerprints that authorise a transaction</string>
+    <string name="save_verification_captures_hint">Stored under verifications/, separate from registration templates, as evidence behind an approval. Declines are never stored. This keeps a biometric per transaction rather than per identity, so it grows without limit \u2014 leave off unless the audit trail is required.</string>
+    <string name="clear_data">Clear data for one ID</string>
+    <string name="clear_data_hint">Deletes that ID only: its templates and verification captures on this device, its Firebase Storage files and its user document. Nothing else in the project is touched.</string>
+    <string name="clear_unique_id">Clear this ID everywhere</string>
+    <string name="label_unique_id">Unique ID (BVN)</string>
+    <string name="clear_confirm_title">Delete %1$s?</string>
+    <string name="clear_confirm_body">This permanently deletes %1$s from this device and from Firebase \u2014 registration templates, verification captures, Storage files and the user document. It cannot be undone. Other IDs are not affected.</string>
+    <string name="clear_confirm_yes">Delete</string>
+    <string name="clearing">Clearing %1$s\u2026</string>
+    <string name="cleared">Cleared %1$s \u2014 %2$s, %3$d history row(s).</string>
+    <string name="local_registrations">On this device: %1$s</string>
+    <string name="no_local_registrations">No registrations stored on this device.</string>
+    <string name="err_unique_id">Unique ID must be 11 digits</string>
+
+    <!-- History -->
+    <string name="history">Scan history</string>
+    <string name="history_button">History</string>
+    <string name="history_empty">No scans recorded on this terminal yet.</string>
+    <string name="history_summary">%1$d scan(s) \u00b7 %2$d registration(s) \u00b7 %3$d approved \u00b7 %4$d declined</string>
+    <string name="export_hint">CSV exports the log. Export files shares the raw .dat templates and images. Tap a row for full detail.</string>
+    <string name="export_csv">Export CSV</string>
+    <string name="export_all_files">Export all files</string>
+    <string name="export_files">Export files</string>
+    <string name="export_failed">Export failed.</string>
+    <string name="export_saved">Saved to %1$s</string>
+    <string name="export_sharing">Sharing %1$d file(s)\u2026</string>
+    <string name="export_zipped">Zipped to %1$s</string>
+    <string name="export_none">No stored files for %1$s.</string>
+    <string name="detail_artifacts">%1$d file(s) stored on this device for this ID.</string>
+    <string name="detail_no_artifacts">No files stored on this device for this ID.</string>
+    <string name="close">Close</string>
 </resources>

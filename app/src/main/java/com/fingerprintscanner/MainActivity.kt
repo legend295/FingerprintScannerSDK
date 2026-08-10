@@ -8,6 +8,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.core.widget.ContentLoadingProgressBar
+import android.content.Intent
+import android.widget.ImageView
+import com.fingerprintscanner.data.AppSettings
+import com.fingerprintscanner.data.ScanHistory
+import com.fingerprintscanner.data.ScanRecord
 import com.fingerprintscanner.utility.showFieldsDialog
 import com.github.legend295.fingerprintscanner.BuildConfig
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -26,8 +31,26 @@ class MainActivity : AppCompatActivity() {
     private var sheet: BottomSheetDialog? = null
     private var progressBar: ContentLoadingProgressBar? = null
     private var pendingBvn: String? = null
+
+    /**
+     * Operator settings, read fresh at each scan launch rather than cached — the user can
+     * change them in [SettingsActivity] and come straight back here.
+     */
+    private val settings by lazy { AppSettings(this) }
+
+    /** Local audit log — every scan lands here, including declines and abandoned attempts. */
+    private val history by lazy { ScanHistory(this) }
+
+    /**
+     * ID of the verification just launched. [pendingBvn] only tracks registrations, so without
+     * this a verification result would be logged against an empty ID.
+     */
+    private var lastScannedId: String = ""
+
+    /** Amount attached to the verification just launched, for the history row. */
+    private var lastAmount: Double? = null
     private val themeOptions = ThemeOptions().apply {
-        buttonColor = R.color.black
+        buttonColor = R.color.waxd_primary
         buttonTextColor = R.color.white
         messageColor = R.color.black
         titleTextColor = R.color.black
@@ -46,6 +69,14 @@ class MainActivity : AppCompatActivity() {
         progressBar?.hide()
 
         tvStatus = findViewById(R.id.tvStatus)
+
+        findViewById<ImageView>(R.id.btnSettings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.btnHistory).setOnClickListener {
+            startActivity(Intent(this, HistoryActivity::class.java))
+        }
 
 
         tvVersion.text = StringBuilder().append("v").append(com.fingerprintscanner.BuildConfig.VERSION_NAME)
@@ -91,8 +122,9 @@ class MainActivity : AppCompatActivity() {
             ) { bvnNumber, phoneNumber, _, amount, _ ->
                 sheet?.dismiss()
                 pendingBvn = null
-//                progressBar?.show()
                 val finalAmount = if (amount.isEmpty()) 100 else amount.toInt()
+                lastScannedId = bvnNumber
+                lastAmount = finalAmount.toDouble()
 //                FingerprintScanner.Builder(this)
                 UpdatedFingerprintScanner.Builder(this)
                     .setUniqueId(bvnNumber)
@@ -101,6 +133,10 @@ class MainActivity : AppCompatActivity() {
                     .setScanningType(ScanningType.VERIFICATION)
                     .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
                     .skipLocation(skipLocation = false)
+//                    .enableBmpExport(enable = true)
+//                    .uploadBmpToFirebase(enable = true)
+                    // Read at launch, not cached: the operator may have just changed it.
+                    .saveVerificationCaptures(settings.saveVerificationCaptures)
                     .setThemeOptions(themeOptions)
                     .setKey("com.scanner.24e2c72b-6506-490d-a818-4112526db233")
                     .start(this, scanningLauncher)
@@ -138,6 +174,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRegistration(bvnNumber: String, phoneNumber: String) {
         pendingBvn = bvnNumber
+        lastScannedId = bvnNumber
+        lastAmount = null
         UpdatedFingerprintScanner.Builder(this)
 //        FingerprintScanner.Builder(this)
             .setUniqueId(bvnNumber)
@@ -152,9 +190,43 @@ class MainActivity : AppCompatActivity() {
             })
             .newRelicToken(BuildConfig.NEW_RELIC_TOKEN)
             .skipLocation(skipLocation = false)
+            .allowDuplicateFingerprints(settings.allowDuplicateFingerprints)
             .enableBmpExport(enable = true)
             .uploadBmpToFirebase(enable = true)
             .start(this, scanningLauncher)
+    }
+
+    /**
+     * Appends one row to the local audit log.
+     *
+     * [summaryJson] is [ScannerConstants.SCAN_SUMMARY] straight from the scanner — the liveness,
+     * threshold, quality and match figures the SDK measured. Parsed leniently: a missing or
+     * malformed summary costs the numbers, never the row itself.
+     */
+    private fun recordHistory(
+        isRegistration: Boolean,
+        uniqueId: String,
+        outcome: String,
+        detail: String,
+        summaryJson: String?,
+    ) {
+        if (uniqueId.isBlank()) return
+        val summary = summaryJson?.let { runCatching { JSONObject(it) }.getOrNull() }
+        history.record(
+            ScanRecord(
+                at = System.currentTimeMillis(),
+                kind = if (isRegistration) HistoryActivity.KIND_REGISTRATION
+                else HistoryActivity.KIND_VERIFICATION,
+                uniqueId = uniqueId,
+                outcome = outcome,
+                detail = detail,
+                amount = if (isRegistration) null else lastAmount,
+                liveness = summary?.optString("liveness").orEmpty(),
+                quality = summary?.optString("quality").orEmpty(),
+                threshold = summary?.optInt("threshold")?.takeIf { it > 0 },
+                score = summary?.optInt("matchScore")?.takeIf { it > 0 },
+            )
+        )
     }
 
     private fun generateBvnNumber(): String {
@@ -205,22 +277,53 @@ class MainActivity : AppCompatActivity() {
 
     private val scanningLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            if (it.resultCode == RESULT_OK) {
-                val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
-                val templateList: ArrayList<File>? =
-                    it.data?.serializable(ScannerConstants.TEMPLATE_DATA)
-                val isVerified: Boolean? =
-                    it.data?.getBooleanExtra(ScannerConstants.VERIFICATION_RESULT, false)
-                Log.d(MainActivity::class.simpleName, list?.size.toString())
-
-                // Both fingerprints scanned and saved → persist BVN for future verification
-                if (pendingBvn != null) {
-                    saveRegisteredBvn(pendingBvn!!)
-                    pendingBvn = null
-                }
-
-                handleResponse(list, isVerified, templateList)
+            if (it.resultCode != RESULT_OK) {
+                // The scanner closes with RESULT_CANCELED when the operator backs out of a
+                // failed pass. Worth logging: an abandoned attempt is exactly what an assessor
+                // asks about, and it never reaches Firestore.
+                recordHistory(
+                    isRegistration = pendingBvn != null,
+                    uniqueId = pendingBvn ?: lastScannedId,
+                    outcome = "Cancelled",
+                    detail = "Closed without completing the scan",
+                    summaryJson = null,
+                )
+                pendingBvn = null
+                return@registerForActivityResult
             }
+
+            val list: ArrayList<File>? = it.data?.serializable(ScannerConstants.DATA)
+            val templateList: ArrayList<File>? =
+                it.data?.serializable(ScannerConstants.TEMPLATE_DATA)
+            val isVerified: Boolean? =
+                it.data?.getBooleanExtra(ScannerConstants.VERIFICATION_RESULT, false)
+            val summaryJson = it.data?.getStringExtra(ScannerConstants.SCAN_SUMMARY)
+            Log.d(MainActivity::class.simpleName, list?.size.toString())
+
+            val wasRegistration = pendingBvn != null
+            recordHistory(
+                isRegistration = wasRegistration,
+                uniqueId = pendingBvn ?: lastScannedId,
+                outcome = when {
+                    wasRegistration -> "Registered"
+                    isVerified == true -> "Approved"
+                    else -> "Declined"
+                },
+                detail = if (wasRegistration) {
+                    "${templateList?.size ?: 0} template(s) saved"
+                } else {
+                    ""
+                },
+                summaryJson = summaryJson,
+            )
+
+            // Both fingerprints scanned and saved → persist BVN for future verification
+            if (pendingBvn != null) {
+                saveRegisteredBvn(pendingBvn!!)
+                pendingBvn = null
+            }
+
+            handleResponse(list, isVerified, templateList)
         }
 
     private fun handleResponse(

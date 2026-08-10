@@ -2,11 +2,13 @@ package com.scanner.utils
 
 import android.app.Dialog
 import android.content.Context
+import android.content.res.ColorStateList
 import android.os.Looper
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.ProgressBar
+import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -36,9 +38,23 @@ internal fun Context.readersInitializationDialog(themeOptions: ThemeOptions?): D
     return dialog
 }
 
+/**
+ * Verification result popup.
+ *
+ * The close affordances ([R.id.ivClose] / [R.id.viewClose]) only dismiss the popup — they never
+ * end the session, so a user who taps them stays on the scanner screen. Leaving is an explicit
+ * action on the bottom button:
+ *  - success → "Done", which invokes [callback] (deliver the result and finish).
+ *  - failure → "Retry" when [onRetry] is supplied, so the user can scan again without going back.
+ *    When no [onRetry] is given the failure variant falls back to "Done" → [callback].
+ *
+ * @param onRetry  Starts another scan pass; supply it to get the Retry button on failure.
+ * @param callback Invoked by the "Done" button only.
+ */
 internal fun Context.verificationDialog(
     themeOptions: ThemeOptions?,
     isSuccess: Boolean,
+    onRetry: (() -> Unit)? = null,
     callback: () -> Unit
 ): Dialog {
     Log.d(this::class.simpleName, "showing:: verificationDialog")
@@ -56,6 +72,7 @@ internal fun Context.verificationDialog(
         val viewClose = findViewById<View>(R.id.viewClose)
         val ivStatus = findViewById<AppCompatImageView>(R.id.ivStatus)
         val progressBar = findViewById<ProgressBar>(R.id.progressBar)
+        val btnAction = findViewById<AppCompatButton>(R.id.btnAction)
         progressBar.visibility = View.GONE
         ivClose.visibility = View.VISIBLE
         ivStatus.visibility = View.VISIBLE
@@ -70,14 +87,26 @@ internal fun Context.verificationDialog(
         message.text =
             if (isSuccess) "The fingerprint authorization is\nsucceeded." else "The fingerprint provided does not match the details used during registration. Please try again using the registered fingerprint."
 
-        viewClose.setOnClickListener {
-            dialog.dismiss()
-            callback()
-        }
+        // Closing only hides the popup — the user stays on the scanner screen.
+        viewClose.setOnClickListener { dialog.dismiss() }
+        ivClose.setOnClickListener { dialog.dismiss() }
 
-        ivClose.setOnClickListener {
+        val showRetry = !isSuccess && onRetry != null
+        btnAction.visibility = View.VISIBLE
+        btnAction.text = getString(if (showRetry) R.string.retry else R.string.done)
+        btnAction.background = ContextCompat.getDrawable(
+            this@verificationDialog,
+            themeOptions?.buttonBackground ?: R.drawable.bg_round_white
+        )
+        btnAction.backgroundTintList = ColorStateList.valueOf(
+            ContextCompat.getColor(this@verificationDialog, themeOptions?.buttonColor ?: R.color.infraRed)
+        )
+        btnAction.setTextColor(
+            ContextCompat.getColor(this@verificationDialog, themeOptions?.buttonTextColor ?: R.color.white)
+        )
+        btnAction.setOnClickListener {
             dialog.dismiss()
-            callback()
+            if (showRetry) onRetry?.invoke() else callback()
         }
     }
 

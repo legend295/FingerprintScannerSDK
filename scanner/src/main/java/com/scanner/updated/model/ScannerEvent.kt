@@ -138,6 +138,23 @@ sealed class ScannerEvent {
     }
 
     /**
+     * These fingerprints are already registered under a different unique ID.
+     *
+     * Only raised when [com.scanner.utils.builder.BuilderOptions.allowDuplicateFingerprints]
+     * is false. The comparison runs against templates held on *this device*, so it catches a
+     * repeat registration on the same terminal — not one performed elsewhere.
+     *
+     * @param readerNo          The reader whose finger matched.
+     * @param existingUniqueId  The unique ID the fingerprints are already registered under.
+     * @param score             Match score reported by the SDK.
+     */
+    data class DuplicateDetected(
+        val readerNo: Int,
+        val existingUniqueId: String,
+        val score: Int,
+    ) : ScannerEvent()
+
+    /**
      * The sensor pad appears soiled: it keeps reporting a finger on an empty platen, so the
      * device will never begin a scan. Sweat and oil build up over a run of captures and read
      * as a permanent partial finger, which no amount of lifting clears.

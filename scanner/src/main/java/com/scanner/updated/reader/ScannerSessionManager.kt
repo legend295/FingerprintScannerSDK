@@ -148,6 +148,8 @@ internal class ScannerSessionManager(
     private var encryptionKey: String = ""
     private var skipFirebaseActions: Boolean = false
     private var enableBmpExport: Boolean = false
+    private var allowDuplicateFingerprints: Boolean = false
+    private var saveVerificationCaptures: Boolean = false
 
     // ──────────────────────────────────────────────────────────────────────────
     // Configuration
@@ -169,12 +171,16 @@ internal class ScannerSessionManager(
         encryptionKey: String,
         skipFirebaseActions: Boolean = false,
         enableBmpExport: Boolean = false,
+        allowDuplicateFingerprints: Boolean = false,
+        saveVerificationCaptures: Boolean = false,
     ) {
         this.scanningType = scanningType
         this.bvnNumber = bvnNumber
         this.encryptionKey = encryptionKey
         this.skipFirebaseActions = skipFirebaseActions
         this.enableBmpExport = enableBmpExport
+        this.allowDuplicateFingerprints = allowDuplicateFingerprints
+        this.saveVerificationCaptures = saveVerificationCaptures
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -565,6 +571,8 @@ internal class ScannerSessionManager(
             encryptionKey = encryptionKey,
             skipFirebaseActions = skipFirebaseActions,
             enableBmpExport = enableBmpExport,
+            allowDuplicateFingerprints = allowDuplicateFingerprints,
+            saveVerificationCaptures = saveVerificationCaptures,
         ).collect { event ->
             // Forward every event to the shared observable stream.
             _events.emit(event)
@@ -582,6 +590,18 @@ internal class ScannerSessionManager(
                     sibling.cancel()
                     logError("$tag collectReader() → dirty sensor on reader ${event.readerNo}")
                     throw SensorDirtyException(event.detail)
+                }
+
+                is ScannerEvent.DuplicateDetected -> {
+                    sibling.cancel()
+                    logError(
+                        "$tag collectReader() → reader ${event.readerNo} already registered " +
+                                "under ${event.existingUniqueId} (score ${event.score})"
+                    )
+                    throw DuplicateEnrolmentException(
+                        "These fingerprints are already registered under ${event.existingUniqueId} " +
+                                "(match score ${event.score})."
+                    )
                 }
 
                 is ScannerEvent.DeviceInSleepMode -> {
@@ -892,6 +912,13 @@ internal class ScannerSessionManager(
      * a plain [Exception] so the sibling reader is cancelled without special-casing.
      */
     class SensorDirtyException(message: String) : Exception(message)
+
+    /**
+     * Thrown when the captured fingers are already registered under another unique ID and
+     * duplicates are not allowed. Same handling as the other domain exceptions: a plain
+     * [Exception], so the sibling reader is cancelled without special-casing.
+     */
+    class DuplicateEnrolmentException(message: String) : Exception(message)
 
     companion object {
         private const val INIT_TIMEOUT_MS = 30_000L

@@ -8,4 +8,26 @@
         <item name="android:windowSoftInputMode">adjustResize|adjustPan</item>
     </style>
 
+    <!--
+        Overlay applied to every AlertDialog in the app (wired up as `alertDialogTheme` on
+        Theme.FingerprintScannerSDK, so plain AlertDialog.Builder(context) picks it up too).
+
+        The app theme paints android:textColorPrimary near-white (@color/waxd_text) for the dark
+        UI. AlertDialog draws its title from textColorPrimary and its message from
+        textColorSecondary, so on the white dialog window both came out invisible. Pin all of
+        them — plus the Material3 colorOnSurface* equivalents — to black.
+    -->
+    <style name="AlertStyle">
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowSoftInputMode">adjustResize|adjustPan</item>
+        <item name="android:textColor">@color/black</item>
+        <item name="android:textColorPrimary">@color/black</item>
+        <item name="android:textColorSecondary">@color/black</item>
+        <item name="android:textColorAlertDialogListItem">@color/black</item>
+        <item name="colorOnSurface">@color/black</item>
+        <item name="colorOnSurfaceVariant">@color/black</item>
+    </style>
+
 </resources>

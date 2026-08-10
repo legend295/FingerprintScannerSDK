@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Only staged exports are shareable. App-private internal storage — the live templates,
+         the history log, preferences — is deliberately NOT exposed here. -->
+    <external-files-path name="exports" path="." />
+</paths>

@@ -40,6 +40,7 @@ import com.newrelic.agent.android.NewRelic
 import com.nextbiometrics.biometrics.NBBiometricsStatus
 import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.scanner.app.ScannerApp
+import com.scanner.model.Transaction
 import com.scanner.model.User
 import com.scanner.updated.model.ReaderResult
 import com.scanner.updated.model.ScannerEvent
@@ -54,6 +55,7 @@ import com.scanner.utils.constants.Constant
 import com.scanner.utils.constants.ScannerConstants
 import com.scanner.utils.enums.PreviewListenerType
 import com.scanner.utils.enums.ScanningType
+import org.json.JSONObject
 import com.scanner.utils.fetchingUserDB
 import com.scanner.utils.location.LocationWrapper
 import com.scanner.utils.readersInitializationDialog
@@ -72,6 +74,7 @@ import java.io.File
 import java.util.Date
 import kotlin.time.Duration.Companion.milliseconds
 import androidx.core.view.isVisible
+import com.google.firebase.Timestamp
 
 /**
  * Refactored scanner activity.
@@ -162,6 +165,9 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      */
     private var userRecordSaved = false
 
+    /** Results of the most recent successful pass, used to build the scan summary extra. */
+    private var lastResults: List<ReaderResult> = emptyList()
+
     // ── Screen on/off tracking ────────────────────────────────────────────────
     // The POS hardware drops the USB fingerprint reader sessions whenever the screen turns
     // off, so a screen-off → screen-on cycle needs a full hardware re-init — the readers won't
@@ -211,6 +217,28 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     /** Local template paths pending cloud upload. */
     private val localTemplatePaths = mutableListOf<String>()
 
+    /**
+     * Local raw-BMP paths from a registration pass, the BMP counterpart of [localTemplatePaths].
+     *
+     * Separate because the two are not interchangeable: a BMP is an optional export written only
+     * when `enableBmpExport` is on, so its count and its paths differ from the templates'. Using
+     * the template list here would report a user as having BMPs they never produced.
+     */
+    private val localBmpPaths = mutableListOf<String>()
+
+    /**
+     * Per-transaction evidence captured during a verification pass, kept apart from the
+     * registration lists because it is uploaded to a different place and reported on the
+     * [Transaction] record rather than the user record.
+     *
+     * Only populated when `saveVerificationCaptures` is enabled, and only for readers that
+     * actually matched — see `FingerprintReaderWrapper.saveVerificationCapture`.
+     */
+    private val verificationCapturePaths = mutableListOf<String>()
+
+    /** Raw BMP counterparts of [verificationCapturePaths]; only written when BMP export is on. */
+    private val verificationBmpPaths = mutableListOf<String>()
+
     /** Tracks per-reader extraction success for the two-finger parity check. */
     private val extractionSuccess = mutableMapOf<Int, Boolean>()
 
@@ -222,18 +250,32 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      */
     private var retryAfterLowQuality = false
 
+    /**
+     * Outcome of the verification pass that just finished, or null when none has (registration,
+     * or a pass still in flight).
+     *
+     * The result popup no longer finishes the activity when it is closed, so this is what tells
+     * [handleStartClick] whether the button behind it means "deliver the result" (true) or
+     * "scan again" (false). Cleared by [clearSessionData].
+     */
+    private var verificationOutcome: Boolean? = null
+
     /** Tracks per-reader identification results for the two-finger verification check. */
     private val identificationResults = mutableMapOf<Int, com.nextbiometrics.biometrics.NBBiometricsIdentifyResult?>()
 
     /**
-     * Tracks, per reader, whether a genuine PUT_FINGER_ON_SENSOR / KEEP_FINGER_ON_SENSOR status
-     * has been observed in the current scan pass. Reset alongside [clearSessionData] at the
-     * start of every fresh scan attempt.
+     * Tracks, per reader, whether a PUT_FINGER_ON_SENSOR / KEEP_FINGER_ON_SENSOR status has been
+     * observed in the current scan pass. Reset alongside [clearSessionData] at the start of every
+     * fresh scan attempt.
      *
-     * Needed because the NextBiometrics hardware can report a LIFT_FINGER status as the very
-     * first event of a pass — a stale finger-presence latch left over from before the reader
-     * went to sleep (see FingerprintScanner_SleepMode_Issue.docx) — with no finger ever having
-     * touched the sensor. A LIFT_FINGER can only be genuine if a PUT/KEEP was seen first.
+     * Used only to word the LIFT_FINGER prompt. The hardware can report LIFT_FINGER as the very
+     * first event of a pass — a stale finger-presence latch left over from before the reader went
+     * to sleep (see FingerprintScanner_SleepMode_Issue.docx) — with no finger ever having touched
+     * the sensor, and "lift your finger" reads as nonsense then.
+     *
+     * It does NOT change what the user is asked to do. LIFT_FINGER means the pad still senses
+     * something and the device will not begin capturing until the platen reads empty, so the
+     * required action is the same either way: clear the sensor.
      */
     private val fingerSeenOnSensor = mutableMapOf<Int, Boolean>()
 
@@ -246,14 +288,49 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     /** Template upload tracking: maps readerNo → remote path. */
     private val templateUploadPaths = mutableMapOf<Int, String>()
 
+    /** Template upload tracking: maps readerNo → remote path. */
+    private val bmpUploadPaths = mutableMapOf<Int, String>()
+
     // ── Coroutine jobs ────────────────────────────────────────────────────────
     private var syncJob: Job? = null
+
+    /**
+     * Scope for fire-and-forget cloud writes — see [ScannerApp.appScope].
+     *
+     * Anything that uploads to Storage or must finish after the user leaves belongs here, not on
+     * `lifecycleScope`: the last act of a session is tapping Done, which finishes the activity
+     * and would cancel an in-flight upload. Everything that drives the UI stays on
+     * `lifecycleScope`, where cancellation on destroy is the correct behaviour.
+     */
+    private val cloudScope: CoroutineScope get() = ScannerApp.getInstance().appScope
 
     /** Polls [ScannerSessionManager.areBothReadersAwake] while readers are asleep. */
     private var sleepPollJob: Job? = null
 
+    /**
+     * Absolute directory the readers write this session's WSQ/JPEG/BMP captures into.
+     *
+     * Emphatically **not** [BuilderOptions.storagePath] — that is the Firebase Storage prefix
+     * (`"biometrics/"`), a cloud key, and passing it here made the readers call
+     * `FileOutputStream("biometrics/00.jpg")`. A relative path resolves against the process
+     * working directory, which is `/` on Android and read-only, so every capture died with
+     * `open failed: ENOENT` and there was consequently nothing on disk to upload.
+     *
+     * App-specific external storage: writable on every API level with no runtime permission,
+     * unaffected by scoped storage, and already covered by the demo app's FileProvider
+     * (`file_paths.xml` → `external-files-path`) so the History export can share the artifacts.
+     * Falls back to internal storage on a device with no external volume mounted.
+     */
+    private val captureDir: String by lazy {
+        val root = getExternalFilesDir(null) ?: filesDir
+        File(root, CAPTURES_DIR).apply { mkdirs() }.path + File.separator
+    }
+
     companion object {
         private const val DEFAULT_STORAGE_PATH = "biometrics/"
+
+        /** Sub-folder of the app's files dir holding scan captures. See [captureDir]. */
+        private const val CAPTURES_DIR = "captures"
 
         /** How often [startSleepModePolling] checks [ScannerSessionManager.areBothReadersAwake]. */
         private const val SLEEP_POLL_INTERVAL_MS = 2000L
@@ -295,7 +372,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         // Background sync of any locally stored but not yet uploaded templates.
         if (!skipFirebaseActions) {
             syncJob = lifecycleScope.launch(Dispatchers.IO) {
-                userRepository.syncPendingUploads(filesDir)
+                userRepository.syncAllPendingUploads(filesDir)
             }
         }
 
@@ -306,6 +383,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             encryptionKey = scanningOptions?.key ?: "",
             skipFirebaseActions = skipFirebaseActions,
             enableBmpExport = scanningOptions?.enableBmpExport ?: false,
+            allowDuplicateFingerprints = scanningOptions?.allowDuplicateFingerprints ?: false,
+            saveVerificationCaptures = scanningOptions?.saveVerificationCaptures ?: false,
         )
         ScannerApp.getInstance().key = scanningOptions?.key
 
@@ -664,7 +743,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private fun showReaderNoResponseDialog(checkSessionAfterWake: Boolean = false) {
         runOnUiThread {
             readerNoResponseDialog = AlertDialog.Builder(this)
-                .setMessage("There is no response from the readers. Do you want to continue this session")
+                .setMessage("There is no response from the readers. Do you want to continue this session.")
                 .setCancelable(false)
                 .setPositiveButton("Yes") { dialog, _ ->
                     dialog.dismiss()
@@ -691,7 +770,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private fun showInitWakeNoResponseDialog() {
         runOnUiThread {
             readerNoResponseDialog = AlertDialog.Builder(this)
-                .setMessage("There is no response from the readers. Do you want to continue this session")
+                .setMessage("There is no response from the readers. Do you want to continue this session.")
                 .setCancelable(false)
                 .setPositiveButton("Yes") { dialog, _ ->
                     dialog.dismiss()
@@ -734,12 +813,15 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             }
 
             is ScannerEvent.FileSaved -> {
+                val isVerification = scanningOptions?.scanningType == ScanningType.VERIFICATION
                 when (event.fileType) {
                     ScannerEvent.FileSaved.FileType.WSQ ->
                         scannedFilePaths.add(File(event.path))
 
-                    ScannerEvent.FileSaved.FileType.BITMAP ->
+                    ScannerEvent.FileSaved.FileType.BITMAP -> {
                         scannedFilePaths.add(File(event.path))
+                        if (isVerification) verificationCapturePaths.add(event.path)
+                    }
 
                     ScannerEvent.FileSaved.FileType.TEMPLATE -> {
                         templateFilePaths.add(File(event.path))
@@ -747,11 +829,13 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                     }
 
                     ScannerEvent.FileSaved.FileType.BMP -> {
-                        if (uploadBmpToFirebase && !skipFirebaseActions) {
-                            val uid = scanningOptions?.uniqueId ?: return
-                            lifecycleScope.launch(Dispatchers.IO) {
-                                userRepository.uploadBmpFile(uid, Uri.fromFile(File(event.path)))
-                            }
+                        // A verification BMP is uploaded later, by saveVerificationTransaction(),
+                        // so its cloud path can go on the transaction record — uploading it here
+                        // as well would write the same bytes twice.
+                        if (isVerification) {
+                            verificationBmpPaths.add(event.path)
+                        } else {
+                            onBmpSaved(event.readerNo, event.path)
                         }
                     }
                 }
@@ -778,6 +862,21 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                 setReaderMessage(event.readerNo, spoofHeadline(event.kind))
                 tintLiveness(event.readerNo, R.color.liveness_error)
                 appendMessage(event.detail, isError = true)
+            }
+
+            is ScannerEvent.DuplicateDetected -> {
+                logError(
+                    "UpdatedScannerActivity :: duplicate on reader ${event.readerNo} — " +
+                            "already registered under ${event.existingUniqueId}"
+                )
+                readerNoticePinned = true
+                setReaderMessage(event.readerNo, "Already registered")
+                tintLiveness(event.readerNo, R.color.liveness_error)
+                appendMessage(
+                    "Rejected — these fingerprints are already registered under " +
+                            "${event.existingUniqueId} (match score ${event.score}).",
+                    isError = true,
+                )
             }
 
             is ScannerEvent.SensorDirty -> {
@@ -812,7 +911,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      * - Other states → no-op (prevents double-tapping during transitions).
      */
     private fun handleStartClick() {
-        val storagePath = scanningOptions?.storagePath ?: DEFAULT_STORAGE_PATH
+        val storagePath = captureDir
         when (val current = sessionManager.state.value) {
             is ScannerState.Ready -> {
                 sleepModeTrack = 0
@@ -891,10 +990,16 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                     return
                 }
                 // Do NOT clear session data here — templateFilePaths must still be populated.
-                // For VERIFICATION the dialog shown in handleScanSuccess() handles delivery;
-                // tapping Done in that state is a no-op to avoid a double-finish.
                 if (scanningOptions?.scanningType == ScanningType.REGISTRATION) {
                     deliverRegistrationResult()
+                    return
+                }
+                // VERIFICATION: the button mirrors the result popup, which no longer finishes
+                // the activity on close — Done delivers the result, Retry scans again.
+                when (verificationOutcome) {
+                    true -> finishWithVerificationResult(true)
+                    false -> retryVerification()
+                    null -> logDebug("UpdatedScannerActivity :: Success with no verification outcome yet")
                 }
             }
 
@@ -936,6 +1041,10 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      * @param r1  Result from reader 1.
      */
     private fun handleScanSuccess(r0: ReaderResult, r1: ReaderResult) {
+        // Retained for [buildScanSummary]: the result Intent is assembled later, from a path
+        // that no longer has the ReaderResults in hand.
+        lastResults = listOf(r0, r1)
+
         // The panels keep showing liveness — the number certification actually tests — so the
         // final peak replaces the last live frame rather than being overwritten by quality.
         renderFinalLiveness(r0)
@@ -965,19 +1074,36 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             // Verification: both identification results must be OK.
             val bothOk = identificationResults.size >= 2 &&
                     identificationResults.values.all { it?.status == NBBiometricsStatus.OK }
+            verificationOutcome = bothOk
             if (bothOk) {
                 setMessage("Fingerprint verified successfully.")
-                showVerificationResultDialog(success = true) {
-                    finishWithVerificationResult(true)
-                }
+                // Done — on the popup or on the screen behind it — delivers the result.
+                setStartButton(getString(R.string.done), visible = true)
+                showVerificationResultDialog(success = true)
                 saveVerificationTransaction()
             } else {
                 setMessage("No match found.")
-                showVerificationResultDialog(success = false) {
-                    finishWithVerificationResult(false)
-                }
+                // Failure offers Retry instead: the user scans again without leaving the SDK.
+                setStartButton(getString(R.string.retry), visible = true)
+                showVerificationResultDialog(success = false)
             }
         }
+    }
+
+    /**
+     * Starts another verification pass after a failed one, without leaving the activity.
+     *
+     * Reached from the Retry button — either on the result popup or on the screen behind it once
+     * the popup has been closed.
+     */
+    private fun retryVerification() {
+        dismissVerificationResultDialog()
+        clearMessages()
+        // Drop the previews from the failed attempt back to the grey placeholder. Without this
+        // the next pass starts with the rejected fingerprints still on screen, which reads as
+        // though they are being scanned again.
+        resetFingerImages()
+        beginScanPass(captureDir)
     }
 
     /**
@@ -1049,12 +1175,12 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         val uid = scanningOptions?.uniqueId ?: return
 
         // Update local path list in Firestore immediately.
-        lifecycleScope.launch(Dispatchers.IO) {
+        cloudScope.launch {
             userRepository.updateUserFields(uid, mapOf("fingerPrintLocalPath" to localTemplatePaths))
         }
 
         // Upload this reader's template to cloud storage.
-        lifecycleScope.launch(Dispatchers.IO) {
+        cloudScope.launch {
             userRepository.uploadTemplateFile(uid, Uri.fromFile(File(localPath)))
                 .onSuccess { remotePath ->
                     templateUploadPaths[readerNo] = remotePath
@@ -1066,6 +1192,53 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
                     }
                 }
                 .onFailure { logError("UpdatedScannerActivity :: template upload failed for reader $readerNo: ${it.message}") }
+        }
+    }
+
+    /**
+     * Handles a saved raw BMP from a registration pass — the BMP counterpart of [onTemplateSaved].
+     *
+     * The local path is always recorded, even when [uploadBmpToFirebase] is off: the file exists
+     * on the device either way, and `fingerPrintBmpLocalPath` is how the host app finds it. Only
+     * the upload half is behind the flag.
+     *
+     * Records but never sets `fingerPrintSyncedOnCloud` — see [UserRepository.syncUserBmp] for
+     * why that flag belongs to the templates alone.
+     *
+     * @param readerNo   The reader that produced this BMP.
+     * @param localPath  Absolute path of the saved .bmp file.
+     */
+    private fun onBmpSaved(readerNo: Int, localPath: String) {
+        localBmpPaths.add(localPath)
+        if (skipFirebaseActions) return
+
+        val uid = scanningOptions?.uniqueId ?: return
+        val localPathsSoFar = localBmpPaths.toList()
+
+        // Record the local path immediately, mirroring the template flow, so a failed or disabled
+        // upload still leaves the file discoverable.
+        val fields = mutableMapOf<String, Any>("fingerPrintBmpLocalPath" to localPathsSoFar)
+        // Enter the retry sweep only when uploads are actually wanted. Leaving the flag null for
+        // a host that opted out keeps those users out of UserRepository.syncPendingBmpUploads()
+        // entirely, rather than having it re-examine and skip them on every launch.
+        if (uploadBmpToFirebase) fields["fingerPrintBmpSyncedOnCloud"] = false
+        cloudScope.launch {
+            userRepository.updateUserFields(uid, fields)
+        }
+
+        if (!uploadBmpToFirebase) return
+
+        cloudScope.launch {
+            userRepository.uploadBmpFile(uid, Uri.fromFile(File(localPath)))
+                .onSuccess { remotePath ->
+                    bmpUploadPaths[readerNo] = remotePath
+                    // Both readers' BMPs are up — write the cloud paths alongside the local ones.
+                    if (bmpUploadPaths.size >= 2) {
+                        userRepository.syncUserBmp(uid, bmpUploadPaths.values.toList(), localBmpPaths.toList())
+                        logDebug("UpdatedScannerActivity :: BMP exports for $uid recorded on the user record")
+                    }
+                }
+                .onFailure { logError("UpdatedScannerActivity :: BMP upload failed for reader $readerNo: ${it.message}") }
         }
     }
 
@@ -1082,7 +1255,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         previewType: PreviewListenerType,
         readerNo: Int,
     ) {
-        if (status == NBDeviceScanStatus.PUT_FINGER_ON_SENSOR || status == NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR) {
+        if (/*status == NBDeviceScanStatus.PUT_FINGER_ON_SENSOR ||*/ status == NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR) {
             fingerSeenOnSensor[readerNo] = true
         }
 
@@ -1090,15 +1263,21 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             NBDeviceScanStatus.PUT_FINGER_ON_SENSOR -> "Place your finger on the sensor."
             NBDeviceScanStatus.KEEP_FINGER_ON_SENSOR -> "Please keep your finger on the sensor."
 
+            // LIFT_FINGER means the pad still senses something and the device will not start
+            // capturing until the platen reads empty — see the NOT_REMOVED/LIFT_FINGER dirty-pad
+            // timer in FingerprintReaderWrapper.buildPreviewListener. So the instruction is always
+            // to clear the sensor; asking for a finger here would keep the platen occupied and
+            // the scan would never begin. Only the wording changes.
             NBDeviceScanStatus.LIFT_FINGER ->
                 if (fingerSeenOnSensor[readerNo] == true) {
                     "Please lift your finger."
                 } else {
-                    // A LIFT_FINGER with no prior PUT/KEEP on this reader in this pass is a
-                    // stale finger-presence latch from the hardware, not a real user action —
-                    // nothing was ever placed to lift. Show the correct instruction instead.
-                    logDebug("UpdatedScannerActivity :: reader $readerNo reported LIFT_FINGER with no prior finger-on-sensor — treating as stale hardware state")
-                    "Place your finger on the sensor."
+                    // No PUT/KEEP was seen on this reader this pass, so nothing was ever placed
+                    // to lift — this is the hardware's stale finger-presence latch. The pad still
+                    // has to read empty before the scan starts; if it stays latched, the wrapper
+                    // escalates to a SensorDirty event after DIRTY_SENSOR_AFTER_MS.
+                    logDebug("UpdatedScannerActivity :: reader $readerNo reported LIFT_FINGER with no prior finger-on-sensor — stale hardware latch, asking for a clear sensor")
+                    "Please clear the sensor."
                 }
 
             NBDeviceScanStatus.WAIT_FOR_SENSOR_INITIALIZATION -> "Initializing sensor, please wait…"
@@ -1124,7 +1303,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         // Optionally delete existing cloud files for this user before re-scanning.
         if (!skipFirebaseActions) {
             scanningOptions?.uniqueId?.let { uid ->
-                lifecycleScope.launch(Dispatchers.IO) {
+                cloudScope.launch {
                     userRepository.deleteCloudTemplatesForUser(uid)
                 }
             }
@@ -1204,7 +1383,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private fun patchStoredLocation(latLng: LatLng) {
         if (skipFirebaseActions || !userRecordSaved) return
         val uid = scanningOptions?.uniqueId ?: return
-        lifecycleScope.launch(Dispatchers.IO) {
+        cloudScope.launch {
             userRepository.updateUserFields(
                 uid,
                 mapOf("gpsCoordinates" to arrayListOf(latLng.latitude, latLng.longitude)),
@@ -1284,7 +1463,12 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
      */
     private suspend fun ensureLocalTemplatesExist(uid: String) {
         val templateDir = File(filesDir, uid)
-        val hasLocalFiles = templateDir.exists() && (templateDir.listFiles()?.isNotEmpty() == true)
+        // Count templates, not files: BMP exports live in this directory too, and a folder
+        // holding only BMPs would otherwise look like a complete enrolment and skip the
+        // download — leaving verification with nothing to match against.
+        val hasLocalFiles = templateDir.exists() &&
+                templateDir.listFiles { f -> f.isFile && f.name.endsWith(Constant.TEMPLATE_FILE_SUFFIX) }
+                    ?.isNotEmpty() == true
 
         if (hasLocalFiles) {
             initializeHardware()
@@ -1336,6 +1520,7 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         val intent = Intent().apply {
             putExtra(ScannerConstants.DATA, scannedFilePaths as java.io.Serializable)
             putExtra(ScannerConstants.TEMPLATE_DATA, templateFilePaths as java.io.Serializable)
+            putExtra(ScannerConstants.SCAN_SUMMARY, buildScanSummary())
         }
         setResult(RESULT_OK, intent)
         finish()
@@ -1349,9 +1534,27 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     private fun finishWithVerificationResult(success: Boolean) {
         val intent = Intent().apply {
             putExtra(ScannerConstants.VERIFICATION_RESULT, success)
+            putExtra(ScannerConstants.SCAN_SUMMARY, buildScanSummary())
         }
         setResult(RESULT_OK, intent)
         finish()
+    }
+
+    /**
+     * Builds the [ScannerConstants.SCAN_SUMMARY] payload from the pass that just finished.
+     *
+     * Returns `"{}"` when there is nothing to report, so the host app can always parse it
+     * without a null check. See that constant for the shape.
+     */
+    private fun buildScanSummary(): String {
+        val results = lastResults
+        if (results.isEmpty()) return "{}"
+        return JSONObject().apply {
+            put("liveness", results.joinToString(" ") { "#${it.readerNo}=${it.livenessScore}" })
+            put("threshold", results.firstOrNull()?.livenessThreshold ?: 0)
+            put("quality", results.joinToString(" ") { "#${it.readerNo}=${it.quality}" })
+            results.mapNotNull { it.identifyResult?.score }.maxOrNull()?.let { put("matchScore", it) }
+        }.toString()
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -1390,6 +1593,8 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
             fingerPrintCount = 0,
             fingerPrintLocalPath = arrayListOf(),
             fingerPrintCloudPath = arrayListOf(),
+            fingerPrintBmpLocalPath = arrayListOf(),
+            fingerPrintBmpCloudPath = arrayListOf(),
             fingerPrintSyncedOnCloud = false,
             timestamp = Date(),
             gpsCoordinates = arrayListOf(fixAtWrite?.latitude, fixAtWrite?.longitude),
@@ -1412,23 +1617,107 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     }
 
     /**
-     * Writes a new transaction record to Firestore after a successful verification.
-     * Only called when [skipFirebaseActions] is false and verification succeeded.
+     * Records a successful verification in Firestore. Only called when [skipFirebaseActions]
+     * is false and both readers identified the user.
+     *
+     * Runs in three steps on one background coroutine:
+     *  1. Upload the captures kept as evidence. The JPEGs always go up when a capture was taken
+     *     at all — that is governed by `saveVerificationCaptures`, not by any upload flag.
+     *     [uploadBmpToFirebase] gates only the bulky raw BMPs, which otherwise stay on the
+     *     device and leave through the host's own export.
+     *  2. Append a [Transaction] to the `transaction` collection: the audit record, carrying the
+     *     amount, device, GPS fix, match score, artifact paths and custom fields. Its
+     *     `fingerPrintCloudPath` names the *enrolled* templates that authorised the transaction,
+     *     read from the user record — not the captures taken during this pass.
+     *  3. Patch the user record so its last-verified state is current.
+     *
+     * A failure at any step is logged by the repository and never blocks result delivery — the
+     * user has already been verified on-device, and the record is an after-the-fact trail.
      */
     private fun saveVerificationTransaction() {
         if (skipFirebaseActions) return
         val uid = scanningOptions?.uniqueId ?: return
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        val customFields = mutableMapOf<String, Any>()
+        scanningOptions?.customObject?.let { jsonObj ->
+            for (key in jsonObj.keys()) {
+                customFields[key] = jsonObj.get(key)
+            }
+        }
+
+        // Snapshot everything the coroutine needs up front: `location` is a companion-object
+        // field the background GPS fetch keeps writing to, and the path lists are cleared by
+        // the next scan pass.
+        val fix = location
+        val capturePaths = verificationCapturePaths.toList()
+        val bmpPaths = verificationBmpPaths.toList()
+        val bestScore = lastResults.mapNotNull { it.identifyResult?.score }.maxOrNull()
+        val device = getAndroidDeviceId()
+
+        // The registered templates this verification matched against, carried over from the user
+        // record that performPreScanChecks() loaded at session start. A verification writes no
+        // template of its own, so this is what `fingerPrintCloudPath` on a transaction means:
+        // which enrolled fingerprints authorized it.
+        val registeredCloudPaths = currentUser?.fingerPrintCloudPath?.toList() ?: emptyList()
+
+        // cloudScope, not lifecycleScope: the user taps Done seconds after this starts, and
+        // finish() would cancel the uploads mid-flight ("Job was canceled").
+        cloudScope.launch {
+            // The captures themselves always go up — they are the evidence the transaction
+            // record points at, and a cloud path list that is empty because of a config flag
+            // makes the record unauditable. uploadBmpToFirebase gates only the raw BMPs, which
+            // are bulky, optional, and already reachable through the host's own export.
+            val captureCloudPaths = uploadVerificationCaptures(uid, capturePaths)
+            val bmpCloudPaths =
+                if (uploadBmpToFirebase) uploadVerificationCaptures(uid, bmpPaths) else emptyList()
+
+            // Synced only when everything that was meant to go up did — a partial upload must
+            // not read as a complete one. BMPs count only when they were in scope to begin with.
+            val synced = capturePaths.isNotEmpty() &&
+                    captureCloudPaths.size == capturePaths.size &&
+                    (!uploadBmpToFirebase || bmpCloudPaths.size == bmpPaths.size)
+
+            val now = Date()
+            userRepository.saveTransaction(
+                Transaction(
+                    amount = scanningOptions?.amount,
+                    timestamp = now,
+                    bvnNumber = uid,
+                    gpsCoordinates = arrayListOf(fix?.latitude, fix?.longitude),
+                    customObject = customFields,
+                    deviceId = device,
+                    matchScore = bestScore?.toLong(),
+                    fingerprintVerificationStatus = true,
+                    fingerPrintLocalPath = emptyList(),
+                    fingerPrintCloudPath = registeredCloudPaths,
+                    fingerPrintBmpLocalPath = bmpPaths,
+                    fingerPrintBmpCloudPath = bmpCloudPaths,
+                    fingerPrintSyncedOnCloud = synced,
+                    lastVerifiedAt = now.time,
+                    type = Constant.VERIFICATION,
+                )
+            )
+
             userRepository.updateUserFields(
                 uid,
                 mapOf(
                     "fingerprintVerificationStatus" to true,
-                    "lastVerifiedAt" to Date().time,
+                    "lastVerifiedAt" to now.time,
                 ),
             )
         }
     }
+
+    /**
+     * Uploads each capture in [localPaths] and returns the storage paths that succeeded.
+     *
+     * The returned list is shorter than [localPaths] when an upload failed, which is what
+     * [saveVerificationTransaction] uses to decide whether the record counts as synced.
+     */
+    private suspend fun uploadVerificationCaptures(uid: String, localPaths: List<String>): List<String> =
+        localPaths.mapNotNull { path ->
+            userRepository.uploadVerificationCapture(uid, Uri.fromFile(File(path))).getOrNull()
+        }
 
     // ──────────────────────────────────────────────────────────────────────────
     // UI helpers
@@ -1750,12 +2039,17 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
         scannedFilePaths.clear()
         templateFilePaths.clear()
         uploadedCloudPaths.clear()
+        bmpUploadPaths.clear()
         localTemplatePaths.clear()
+        localBmpPaths.clear()
+        verificationCapturePaths.clear()
+        verificationBmpPaths.clear()
         extractionSuccess.clear()
         identificationResults.clear()
         templateUploadPaths.clear()
         fingerSeenOnSensor.clear()
         retryAfterLowQuality = false
+        verificationOutcome = null
         // sleepModeTrack is intentionally NOT reset here — it must accumulate across
         // retries so the > 6 threshold is reachable. Reset it explicitly at each
         // fresh scan start or after a full reinit.
@@ -1818,19 +2112,33 @@ internal class UpdatedScannerActivity : AppCompatActivity() {
     }
 
     /**
-     * Shows a verification result dialog and invokes [onDismiss] when the user taps OK.
+     * Shows the verification result popup.
      *
-     * @param success    Whether to show the success or failure variant.
-     * @param onDismiss  Lambda called after the user acknowledges the dialog.
+     * Closing the popup only hides it — the user stays on the scanner screen with the same
+     * Done/Retry choice on the Start button. Leaving is an explicit action:
+     * "Done" delivers the result, "Retry" (failure only) starts another pass.
+     *
+     * A previous popup is always dismissed and rebuilt so a retry can show its own result.
+     *
+     * @param success  Whether to show the success or failure variant.
      */
-    private fun showVerificationResultDialog(success: Boolean, onDismiss: () -> Unit) {
+    private fun showVerificationResultDialog(success: Boolean) {
         runOnUiThread {
-            if (verificationResultDialog == null) {
-                verificationResultDialog = verificationDialog(scanningOptions?.themeOptions, success) {
-                    onDismiss()
-                }
+            dismissVerificationResultDialog()
+            verificationResultDialog = verificationDialog(
+                themeOptions = scanningOptions?.themeOptions,
+                isSuccess = success,
+                onRetry = if (success) null else ({ retryVerification() }),
+            ) {
+                finishWithVerificationResult(success)
             }
         }
+    }
+
+    /** Dismisses the verification result popup and drops the reference so it can be rebuilt. */
+    private fun dismissVerificationResultDialog() {
+        runCatching { verificationResultDialog?.dismiss() }
+        verificationResultDialog = null
     }
 
     /**

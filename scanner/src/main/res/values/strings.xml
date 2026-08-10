@@ -10,7 +10,7 @@
     <string name="scan_fingerprints">Scan Fingerprints</string>
     <string name="please_place_your_chosen_fingers_on_the_scanner_above">Please place your chosen fingers on the\nscanner above.</string>
     <string name="initialising_fingerprints">Initialising Fingerprints</string>
-    <string name="please_wait_for_to_initialise_the_nfingerprints_session">Please wait for to initialise the\nfingerprints session</string>
+    <string name="please_wait_for_to_initialise_the_nfingerprints_session">Please wait for the fingerprint\nsession to initialise.</string>
     <string name="start_scanning">Start Scanning</string>
     <string name="cancel">Cancel</string>
 
@@ -28,6 +28,9 @@
     <string name="firmware_upgrade_progress">Firmware Upgrade In-Progress Do not Back press or close the application</string>
     <string name="downloading_fingerprints">Downloading Fingerprints</string>
     <string name="fingerprints_download_is_in_progress_please_wait">Fingerprints download is in progress.\nPlease wait…</string>
+
+    <string name="done">Done</string>
+    <string name="retry">Retry</string>
 
     <!-- Liveness is shown as a percentage OF THE PASS THRESHOLD, not of a full scale. -->
     <string name="liveness_percent">%1$d%%</string>

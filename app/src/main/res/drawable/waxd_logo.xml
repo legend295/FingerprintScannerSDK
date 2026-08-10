@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WAXD wordmark. Drawn as strokes rather than filled letterforms so it stays crisp
+  at the TPS900's modest density without shipping raster assets per bucket.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="50dp"
+    android:viewportWidth="320"
+    android:viewportHeight="80">
+
+    <!-- W -->
+    <path
+        android:pathData="M10,14 L28,66 L45,30 L62,66 L80,14"
+        android:strokeColor="@color/waxd_primary"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- A -->
+    <path
+        android:pathData="M96,66 L125,14 L154,66"
+        android:strokeColor="@color/waxd_primary"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M108,48 L142,48"
+        android:strokeColor="@color/waxd_primary"
+        android:strokeWidth="11"
+        android:strokeLineCap="round" />
+
+    <!-- X -->
+    <path
+        android:pathData="M170,14 L224,66"
+        android:strokeColor="@color/waxd_primary"
+        android:strokeWidth="11"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M224,14 L170,66"
+        android:strokeColor="@color/waxd_primary"
+        android:strokeWidth="11"
+        android:strokeLineCap="round" />
+
+    <!-- D -->
+    <path
+        android:pathData="M244,14 L244,66"
+        android:strokeColor="@color/waxd_primary"
+        android:strokeWidth="11"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M244,14 L266,14 C288,14 296,27 296,40 C296,53 288,66 266,66 L244,66"
+        android:strokeColor="@color/waxd_primary"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

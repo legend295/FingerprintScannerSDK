@@ -41,8 +41,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
+import com.scanner.utils.constants.Constant
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.IntBuffer
@@ -179,6 +181,18 @@ internal class FingerprintReaderWrapper(
 
         /** Detect at or above this means the pad was fully covered. */
         private const val FULL_CONTACT_DETECT = 255
+
+        /**
+         * Subdirectory of `filesDir` holding per-transaction verification captures.
+         *
+         * Deliberately excluded from the registration gallery: it sits alongside the
+         * per-uniqueId template directories, so anything walking `filesDir` for registered
+         * identities must skip it or it would be read as a unique ID of its own.
+         */
+        const val VERIFICATIONS_DIR = "verifications"
+
+        /** Suffix every saved ISO template file carries. Shared with the Firebase layer. */
+        const val TEMPLATE_SUFFIX = Constant.TEMPLATE_FILE_SUFFIX
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -317,6 +331,10 @@ internal class FingerprintReaderWrapper(
      * @param encryptionKey     Application-level encryption key for template files.
      * @param skipFirebaseActions  When true the template is written but not checked against cloud state.
      * @param enableBmpExport   When true a BMP file is also written alongside the JPEG preview.
+     * @param allowDuplicateFingerprints  When false, a registration whose finger already matches
+     *                          another unique ID's stored templates is refused.
+     * @param saveVerificationCaptures  When true, a successful verification's template is kept
+     *                          under `verifications/<uniqueId>/`.
      */
     fun scanAndExtractFlow(
         savePath: String,
@@ -325,6 +343,8 @@ internal class FingerprintReaderWrapper(
         encryptionKey: String,
         skipFirebaseActions: Boolean,
         enableBmpExport: Boolean,
+        allowDuplicateFingerprints: Boolean = false,
+        saveVerificationCaptures: Boolean = false,
     ): Flow<ScannerEvent> = callbackFlow {
         if (!isInitialized || device == null) {
             trySend(ScannerEvent.ReaderError(readerNo, IllegalStateException("Reader $readerNo not initialized")))
@@ -409,6 +429,21 @@ internal class FingerprintReaderWrapper(
 
                     val template = extractResult.template
 
+                    // Duplicate registration check — before anything is written to disk or the
+                    // cloud, so a rejected enrolment leaves nothing behind.
+                    if (!allowDuplicateFingerprints) {
+                        findDuplicateRegistration(ctx, template, bvnNumber)?.let { hit ->
+                            send(ScannerEvent.DuplicateDetected(readerNo, hit.uniqueId, hit.score))
+                            close(
+                                ScannerSessionManager.DuplicateEnrolmentException(
+                                    "These fingerprints are already registered under ${hit.uniqueId} " +
+                                            "(match score ${hit.score})."
+                                )
+                            )
+                            return@callbackFlow
+                        }
+                    }
+
                     // Quality comes off the template, NOT NBDevice.GetImageQuality: that static
                     // helper returns plausible NFIQ values but leaves the SDK's global last-error
                     // set, and the next SDK call reads it — which is what made every extract after
@@ -450,7 +485,12 @@ internal class FingerprintReaderWrapper(
                         }
 
                         if (enableBmpExport) {
-                            runCatching { saveRawBmpFile(img, savePath, timestamp) }
+                            // Into the per-user template directory, not savePath: the BMP is an
+                            // export of this user's enrolled finger, so it belongs with the
+                            // template it was captured alongside — which is also where the host
+                            // app's artifact export looks. Everything that walks that directory
+                            // filters on TEMPLATE_SUFFIX, so the .bmp cannot be mistaken for one.
+                            runCatching { saveRawBmpFile(img, templateDir, timestamp) }
                                 .onSuccess { path ->
                                     path?.let {
                                         send(
@@ -568,6 +608,18 @@ internal class FingerprintReaderWrapper(
                     }
                     send(ScannerEvent.Message(readerNo, statusMsg, identifyResult.status != NBBiometricsStatus.OK))
 
+                    // Keep the finger that authorised the transaction, when asked to. Only on a
+                    // match: a declined verification is not evidence of anything, and storing it
+                    // would collect biometrics from people who failed to authenticate.
+                    var verificationPath: String? = null
+                    if (saveVerificationCaptures && identifyResult.status == NBBiometricsStatus.OK) {
+                        verificationPath = saveVerificationCapture(
+                            image = previewListener.lastImage,
+                            bvnNumber = bvnNumber,
+                            enableBmpExport = enableBmpExport,
+                        ) { path, type -> trySend(ScannerEvent.FileSaved(readerNo, path, type)) }
+                    }
+
                     send(
                         ScannerEvent.ScanCompleted(
                             ReaderResult(
@@ -575,7 +627,7 @@ internal class FingerprintReaderWrapper(
                                 extractStatus = null,
                                 identifyResult = identifyResult,
                                 wsqPath = null,
-                                bitmapPath = null,
+                                bitmapPath = verificationPath,
                                 templatePath = null,
                                 quality = quality,
                                 livenessScore = peakLiveness,
@@ -1149,7 +1201,9 @@ internal class FingerprintReaderWrapper(
         val encKey = ScannerApp.getInstance().key ?: ""
         val bvn = File(templateDir).name  // bvnNumber is the dir name
 
-        return dir.listFiles()
+        // Only template files: this directory can also hold artifacts written by other flows,
+        // and handing a JPEG to loadTemplate() would fail the whole verification.
+        return dir.listFiles { f -> f.isFile && f.name.endsWith(TEMPLATE_SUFFIX) }
             ?.mapIndexedNotNull { index, file ->
                 runCatching {
                     val decrypted = KeyStorePortable.decryptData(file.path, bvn, encKey)
@@ -1160,6 +1214,99 @@ internal class FingerprintReaderWrapper(
                 }.getOrNull()
             }
             ?: emptyList()
+    }
+
+    /** A registration that matched an already-registered identity. */
+    private data class DuplicateHit(val uniqueId: String, val score: Int)
+
+    /**
+     * Checks a freshly extracted template against every *other* unique ID's stored templates.
+     *
+     * Only templates held on this device are compared, so this catches a repeat registration on
+     * the same terminal — not one performed on another. That is the same scope the reference
+     * implementation works at, and it is what a demo or certification run actually exercises.
+     *
+     * Runs before anything is written, so a rejected registration leaves no files behind. Any
+     * template that fails to decrypt is skipped rather than failing the whole check: a single
+     * unreadable file from an older key must not silently disable duplicate detection for the
+     * rest of the gallery.
+     *
+     * @return The first match found, or null when these fingers are new to this device.
+     */
+    private fun findDuplicateRegistration(
+        ctx: NBBiometricsContext,
+        template: NBBiometricsTemplate,
+        bvnNumber: String,
+    ): DuplicateHit? {
+        val encKey = ScannerApp.getInstance().key ?: ""
+        val others = context.filesDir.listFiles { f ->
+            f.isDirectory && f.name != bvnNumber && f.name != VERIFICATIONS_DIR
+        } ?: return null
+
+        for (dir in others) {
+            val files = dir.listFiles { f -> f.isFile && f.name.endsWith(TEMPLATE_SUFFIX) }
+                ?: continue
+            for (file in files) {
+                val stored = runCatching {
+                    KeyStorePortable.decryptData(file.path, dir.name, encKey)
+                        ?.let { ctx.loadTemplate(NBBiometricsTemplateType.ISO, it) }
+                }.getOrNull() ?: continue
+
+                val result = runCatching {
+                    ctx.verify(template, stored, NBBiometricsSecurityLevel.HIGH)
+                }.getOrNull() ?: continue
+
+                if (result.status == NBBiometricsStatus.OK) {
+                    logError("$tag duplicate: already registered under ${dir.name} (score ${result.score})")
+                    return DuplicateHit(dir.name, result.score)
+                }
+            }
+        }
+        logDebug("$tag no duplicate across ${others.size} other registration(s)")
+        return null
+    }
+
+    /**
+     * Writes the finger that authorised a verification under `verifications/<uniqueId>/`.
+     *
+     * Kept separate from the registration directory so the two never mix: registration
+     * templates are the identity, these are per-transaction evidence, and
+     * [findDuplicateRegistration] and [loadStoredTemplates] both skip this directory.
+     *
+     * @param onSaved  Called for each artifact written, so the caller can emit a FileSaved event.
+     * @return The BMP path when one was written, or null.
+     */
+    private fun saveVerificationCapture(
+        image: ByteArray?,
+        bvnNumber: String,
+        enableBmpExport: Boolean,
+        onSaved: (String, ScannerEvent.FileSaved.FileType) -> Unit,
+    ): String? {
+        val px = image ?: run {
+            logError("$tag verification capture requested but no image was available")
+            return null
+        }
+        val dir = File(File(context.filesDir, VERIFICATIONS_DIR), bvnNumber)
+            .also { it.mkdirs() }
+        val timestamp = System.currentTimeMillis()
+
+        var bmpPath: String? = null
+        runCatching {
+            convertToArgbBitmap(px)?.let { bmp ->
+                saveBitmapJpeg(bmp, "${dir.path}/", timestamp)?.let { path ->
+                    bmpPath = path
+                    onSaved(path, ScannerEvent.FileSaved.FileType.BITMAP)
+                }
+            }
+            if (enableBmpExport) {
+                saveRawBmpFile(px, "${dir.path}/", timestamp)?.let { path ->
+                    onSaved(path, ScannerEvent.FileSaved.FileType.BMP)
+                }
+            }
+        }.onFailure { logError("$tag verification capture save failed: ${it.message}") }
+
+        logDebug("$tag verification capture saved under ${dir.path}")
+        return bmpPath
     }
 
     /**
@@ -1220,16 +1367,39 @@ internal class FingerprintReaderWrapper(
     private fun saveRawFile(data: ByteArray?, extension: String = "wsq", dir: String, timestamp: Long): String? {
         if (data == null) return null
         return try {
-            File(dir).mkdirs()
-            val path = "$dir${readerNo}$timestamp.$extension"
-            FileOutputStream(path).use { it.write(data) }
-            logDebug("$tag saveRawFile() → $path")
-            path
+            val file = File(prepareDir(dir), "$readerNo$timestamp.$extension")
+            FileOutputStream(file).use { it.write(data) }
+            logDebug("$tag saveRawFile() → ${file.path}")
+            file.path
         } catch (e: Exception) {
             NewRelic.recordHandledException(e)
             logError("$tag saveRawFile() → Exception: ${e.message}")
             null
         }
+    }
+
+    /**
+     * Resolves [dir] and makes sure it exists and is writable, throwing with the reason if not.
+     *
+     * The callers used to rely on `File(dir).mkdirs()` and then hand a concatenated string to
+     * [FileOutputStream]. That hid two failures behind one confusing symptom: a relative `dir`
+     * resolves against the process working directory — `/` on Android, read-only — and an
+     * unchecked `mkdirs()` returning false left the write to fail later. Both surfaced as
+     * `open failed: ENOENT` from the stream, pointing at the file rather than the directory.
+     *
+     * @param dir  Absolute directory path, with or without a trailing separator.
+     * @return     The directory, guaranteed to exist.
+     */
+    private fun prepareDir(dir: String): File {
+        val target = File(dir)
+        require(target.isAbsolute) {
+            "capture directory must be absolute, got '$dir' — a relative path resolves against '/'"
+        }
+        if (!target.exists() && !target.mkdirs() && !target.exists()) {
+            throw IOException("could not create capture directory ${target.path}")
+        }
+        if (!target.isDirectory) throw IOException("capture path is not a directory: ${target.path}")
+        return target
     }
 
     /**
@@ -1242,14 +1412,13 @@ internal class FingerprintReaderWrapper(
      */
     private fun saveBitmapJpeg(bitmap: Bitmap, dir: String, timestamp: Long): String? {
         return try {
-            File(dir).mkdirs()
-            val path = "$dir${readerNo}$timestamp.jpg"
-            FileOutputStream(path).use { out ->
+            val file = File(prepareDir(dir), "$readerNo$timestamp.jpg")
+            FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                 out.flush()
             }
-            logDebug("$tag saveBitmapJpeg() → $path")
-            path
+            logDebug("$tag saveBitmapJpeg() → ${file.path}")
+            file.path
         } catch (e: Exception) {
             NewRelic.recordHandledException(e)
             logError("$tag saveBitmapJpeg() → Exception: ${e.message}")
@@ -1301,12 +1470,12 @@ internal class FingerprintReaderWrapper(
         }
 
         return try {
-            File(dir).mkdirs()
-            val path = "$dir${readerNo}${timestamp}.bmp"
-            FileOutputStream(path).use { it.write(buf.array()) }
-            logDebug("$tag saveRawBmpFile() → $path")
-            path
+            val file = File(prepareDir(dir), "$readerNo$timestamp.bmp")
+            FileOutputStream(file).use { it.write(buf.array()) }
+            logDebug("$tag saveRawBmpFile() → ${file.path}")
+            file.path
         } catch (e: Exception) {
+            NewRelic.recordHandledException(e)
             logError("$tag saveRawBmpFile() → Exception: ${e.message}")
             null
         }

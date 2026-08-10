@@ -7,7 +7,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_margin="@dimen/margin"
-        android:background="@drawable/bg_round_white">
+        android:background="@drawable/bg_round_white"
+        android:orientation="vertical">
 
         <androidx.constraintlayout.widget.ConstraintLayout
             android:id="@+id/main"
@@ -61,7 +62,7 @@
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/tvTitle"
-                tools:text="The fingerprint provided does not match the details used during registration. Please try again using the registered fingerprint." />
+                />
 
             <androidx.constraintlayout.widget.ConstraintLayout
                 android:id="@+id/clFingerprint"
@@ -110,6 +111,26 @@
                 tools:visibility="gone" />
 
         </androidx.constraintlayout.widget.ConstraintLayout>
+
+        <!--
+            Action button for the verification result dialog ("Done" on success, "Retry" on
+            failure). Hidden by default so every other dialog built from this layout is
+            unaffected; verificationDialog() makes it visible and labels it.
+        -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnAction"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="@dimen/margin"
+            android:background="@drawable/bg_round_white"
+            android:gravity="center"
+            android:padding="12dp"
+            android:text="@string/done"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            android:textSize="17sp"
+            android:visibility="gone"
+            tools:visibility="visible" />
     </LinearLayout>
 
 
