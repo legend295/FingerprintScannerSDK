@@ -19,6 +19,7 @@ import com.nextbiometrics.devices.NBDeviceEncodeFormat
 import com.nextbiometrics.devices.NBDeviceFingerPosition
 import com.nextbiometrics.devices.NBDeviceImageQualityAlgorithm
 import com.nextbiometrics.devices.NBDeviceScanFormatInfo
+import com.nextbiometrics.devices.NBDeviceScanStatus
 import com.nextbiometrics.devices.NBDeviceSecurityModel
 import com.nextbiometrics.devices.NBDeviceState
 import com.nextbiometrics.system.NextBiometricsException
@@ -80,14 +81,49 @@ internal class FingerprintReaderWrapper(
     // ── State flags ───────────────────────────────────────────────────────────
     private var isInitialized = false
 
-    // ── Anti-spoof configuration ──────────────────────────────────────────────
-    private val isSpoofEnabled = true
+    // ── Anti-spoof state ──────────────────────────────────────────────────────
+    // All are written on the SDK's preview-callback thread and read on the scan coroutine,
+    // so each needs @Volatile for the read to see the write.
+
+    /** True only once [configureAntispoof] confirmed the device stored the parameters. */
+    @Volatile
+    private var antispoofActive = false
+
+    /** Threshold the device reports it is enforcing. Logged for tuning; not compared against. */
+    @Volatile
+    private var activeAntispoofThreshold = REQUESTED_ANTISPOOF_THRESHOLD
+
+    /**
+     * Lowest non-zero liveness score seen this scan pass, or [MAX_ANTISPOOF_THRESHOLD] if the
+     * device never reported one. **Diagnostic only — never used to reject a scan.**
+     *
+     * Neither NextBiometrics Android sample gates on this value: the one-finger sample never
+     * reads it, and the dual-reader sample only prints it. It also has no fixed scale — the two
+     * samples cap it at 1000 and 40000 respectively — and readers that do not implement
+     * anti-spoof report a flat 0, which is indistinguishable from a genuine spoof reading.
+     * The verdict comes from the SDK statuses in [isSpoofDetected] instead.
+     */
+    @Volatile
     private var spoofScore = MAX_ANTISPOOF_THRESHOLD
-    private var isValidSpoofScore = false
+
+    /** True when the device itself flagged a preview frame as a spoof. */
+    @Volatile
+    private var deviceReportedSpoof = false
 
     companion object {
         const val MAX_ANTISPOOF_THRESHOLD = 1000
-        private const val DEFAULT_ANTISPOOF_THRESHOLD = 363
+
+        /**
+         * Anti-spoof threshold handed to the device, which applies it internally: it treats a scan
+         * as live when the liveness score exceeds this value, and reports the verdict through
+         * `NBBiometricsStatus.SPOOF_DETECTED` / `NBDeviceScanStatus.SPOOF`. Pass `-1` to have the
+         * SDK restore its own default.
+         *
+         * 363 is the default from the NextBiometrics one-finger Android sample. This value only
+         * tunes the device's own decision — nothing in this class compares against it.
+         */
+        private const val REQUESTED_ANTISPOOF_THRESHOLD = 363
+
         private const val CONFIGURE_ANTISPOOF = 108
         private const val CONFIGURE_ANTISPOOF_THRESHOLD = 109
         private const val ENABLE_ANTISPOOF = 1
@@ -183,10 +219,8 @@ internal class FingerprintReaderWrapper(
             }
             scanFormatInfo = formats[0]
 
-            if (isSpoofEnabled) {
-                runCatching { configureAntispoof() }
-                    .onFailure { Log.w(tag, "Anti-spoof not supported on this device: ${it.message}") }
-            }
+            runCatching { configureAntispoof() }
+                .onFailure { Log.w(tag, "Anti-spoof not supported on this device: ${it.message}") }
 
             isInitialized = true
             logDebug("$tag doInit() → OK (format=${scanFormatInfo?.formatType})")
@@ -267,8 +301,7 @@ internal class FingerprintReaderWrapper(
 
                 // ── Registration: extract biometric template ───────────────────
                 ScanningType.REGISTRATION -> {
-                    spoofScore = MAX_ANTISPOOF_THRESHOLD
-                    isValidSpoofScore = false
+                    resetSpoofState()
 
                     trySend(ScannerEvent.Message(readerNo, "Place your finger on the sensor.", false))
 
@@ -292,17 +325,21 @@ internal class FingerprintReaderWrapper(
 
                     send(ScannerEvent.ExtractionDone(readerNo, extractResult.status))
 
+                    logSpoofDiagnostics(extractResult.status)
+
+                    // Anti-spoof is checked before the generic status branch below: SPOOF_DETECTED
+                    // is an NBBiometricsStatus like any other, so "extraction failed" would
+                    // otherwise swallow it and report a presentation attack as a capture error.
+                    if (isSpoofDetected(extractResult.status)) {
+                        send(ScannerEvent.SpoofDetected(readerNo))
+                        close(ScannerSessionManager.SpoofDetectedException("Spoof detected on reader $readerNo"))
+                        return@callbackFlow
+                    }
+
                     if (extractResult.status != NBBiometricsStatus.OK) {
                         val msg = "Extraction failed: ${extractResult.status}"
                         send(ScannerEvent.Message(readerNo, msg, true))
                         close(Exception(msg))
-                        return@callbackFlow
-                    }
-
-                    // Anti-spoof check after extraction.
-                    if (isSpoofEnabled && isValidSpoofScore && spoofScore <= DEFAULT_ANTISPOOF_THRESHOLD) {
-                        send(ScannerEvent.SpoofDetected(readerNo))
-                        close(Exception("Spoof detected on reader $readerNo"))
                         return@callbackFlow
                     }
 
@@ -395,8 +432,7 @@ internal class FingerprintReaderWrapper(
 
                 // ── Verification: identify against stored templates ─────────────
                 ScanningType.VERIFICATION -> {
-                    spoofScore = MAX_ANTISPOOF_THRESHOLD
-                    isValidSpoofScore = false
+                    resetSpoofState()
 
                     // Load all stored encrypted templates for this user.
                     val templates = loadStoredTemplates(ctx, templateDir)
@@ -434,9 +470,14 @@ internal class FingerprintReaderWrapper(
                     )
                     send(ScannerEvent.IdentificationDone(readerNo, identifyResult))
 
-                    if (isSpoofEnabled && isValidSpoofScore && spoofScore <= DEFAULT_ANTISPOOF_THRESHOLD) {
+                    logSpoofDiagnostics(identifyResult.status)
+
+                    // Must run before the status branch below, which has no SPOOF_DETECTED case and
+                    // would let the flow complete normally — surfacing a presentation attack to the
+                    // user as "No match found" once the activity sees a non-OK identify status.
+                    if (isSpoofDetected(identifyResult.status)) {
                         send(ScannerEvent.SpoofDetected(readerNo))
-                        close(Exception("Spoof detected on reader $readerNo"))
+                        close(ScannerSessionManager.SpoofDetectedException("Spoof detected on reader $readerNo"))
                         return@callbackFlow
                     }
 
@@ -591,9 +632,17 @@ internal class FingerprintReaderWrapper(
             private set
 
         override fun preview(event: NBBiometricsScanPreviewEvent) {
-            spoofScore = event.livenessScoreValue
-            isValidSpoofScore = spoofScore in 1..MAX_ANTISPOOF_THRESHOLD
-            if (!isValidSpoofScore) spoofScore = 0
+            // The device's own per-frame verdict. Independent of the score, and the only anti-spoof
+            // signal available when the SDK rejects a frame before scoring it.
+            val scanStatus = event.scanStatus
+            if (scanStatus == NBDeviceScanStatus.SPOOF || scanStatus == NBDeviceScanStatus.SPOOF_DETECTED) {
+                deviceReportedSpoof = true
+            }
+            // Diagnostic only — never a gate. See [spoofScore] for why.
+            if (antispoofActive && event.fingerDetectValue > 0) {
+                val score = event.livenessScoreValue
+                if (score > 0) spoofScore = minOf(spoofScore, score)
+            }
 
             event.image?.let { img ->
                 lastImage = img
@@ -681,12 +730,78 @@ internal class FingerprintReaderWrapper(
     }
 
     /**
-     * Configures anti-spoofing on the device with the default threshold.
-     * Throws if the device does not support anti-spoof; callers should catch and log.
+     * Enables anti-spoofing on the device and records whether it actually took effect.
+     *
+     * Only a subset of NextBiometrics readers support anti-spoof — per the SDK documentation:
+     * NB-2023-S-UID, NB-2023-U-UID, NB-3023-U-UID, NB-65200-U and NB-65210-S. On any other device
+     * `setParameter` throws or is ignored, so both values are read back and [antispoofActive] is
+     * set only when the device confirms them. No scan is ever treated as spoofed unless that flag
+     * is true, which keeps unsupported hardware out of the spoof paths entirely.
+     *
+     * May throw; [doInit] catches and logs.
      */
     private fun configureAntispoof() {
-        device?.setParameter(CONFIGURE_ANTISPOOF.toLong(), ENABLE_ANTISPOOF)
-        device?.setParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong(), DEFAULT_ANTISPOOF_THRESHOLD)
+        antispoofActive = false
+        val dev = device ?: return
+
+        dev.setParameter(CONFIGURE_ANTISPOOF.toLong(), ENABLE_ANTISPOOF)
+        dev.setParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong(), REQUESTED_ANTISPOOF_THRESHOLD)
+
+        val enabled = dev.getParameter(CONFIGURE_ANTISPOOF.toLong())
+        if (enabled != ENABLE_ANTISPOOF) {
+            logError("$tag anti-spoof not applied — parameter reads back as $enabled")
+            return
+        }
+
+        // The device is the single source of truth for the threshold: the score check compares
+        // against what it reports here, so a value it clamped or defaulted cannot drift from ours.
+        val applied = dev.getParameter(CONFIGURE_ANTISPOOF_THRESHOLD.toLong())
+        activeAntispoofThreshold =
+            if (applied in 0..MAX_ANTISPOOF_THRESHOLD) applied else REQUESTED_ANTISPOOF_THRESHOLD
+        antispoofActive = true
+        logDebug("$tag anti-spoof enabled (threshold=$activeAntispoofThreshold)")
+    }
+
+    /**
+     * Combined anti-spoof verdict for the scan that just finished, across all three signals the
+     * SDK exposes: the operation status, the device's per-frame scan status, and the liveness
+     * score. Any one of them is enough to reject the scan.
+     *
+     * Gated on [antispoofActive] so a device without anti-spoof support — where none of these
+     * signals are populated — can never produce a false spoof.
+     *
+     * @param status  Status returned by the `extract` or `identify` call that just completed.
+     */
+    private fun isSpoofDetected(status: NBBiometricsStatus?): Boolean {
+        if (status == NBBiometricsStatus.SPOOF_DETECTED) return true
+        return antispoofActive && deviceReportedSpoof
+    }
+
+    /**
+     * Clears the per-scan anti-spoof signals and re-applies the device parameters.
+     *
+     * Both NextBiometrics Android samples call their `enableSpoof()` immediately before every
+     * `extract()` / `identify()` rather than once at init, so the same is done here — configuring
+     * only in [doInit] is not enough to guarantee the setting is live for a given scan.
+     */
+    private fun resetSpoofState() {
+        spoofScore = MAX_ANTISPOOF_THRESHOLD
+        deviceReportedSpoof = false
+        runCatching { configureAntispoof() }
+            .onFailure { Log.w(tag, "Anti-spoof re-apply failed: ${it.message}") }
+    }
+
+    /** Logs the anti-spoof signals for the pass that just ran. Diagnostic only. */
+    private fun logSpoofDiagnostics(status: NBBiometricsStatus?) {
+        if (!antispoofActive) {
+            logDebug("$tag anti-spoof inactive — no spoof signals collected")
+            return
+        }
+        val observed = if (spoofScore == MAX_ANTISPOOF_THRESHOLD) "none" else spoofScore.toString()
+        logDebug(
+            "$tag anti-spoof: status=$status, deviceReportedSpoof=$deviceReportedSpoof, " +
+                    "liveness=$observed (threshold=$activeAntispoofThreshold)"
+        )
     }
 
     /**
