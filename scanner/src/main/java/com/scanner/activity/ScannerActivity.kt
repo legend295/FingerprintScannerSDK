@@ -2185,8 +2185,8 @@ internal class ScannerActivity : AppCompatActivity() {
                     } ?: run {
                         callback(false, "User not found.")
                     }
-                } else if (items.size <= 1 || items.size > 2) {
-                    // if file size is smaller then or equal to 1 or items size is greater then 2 then delete the folder files and upload again
+                } else if (items.size !in 2..2) {
+                    // if file size is smaller than or equal to 1 or items size is greater then 2 then delete the folder files and upload again
                     // because we are only supporting 2 fingerprint scanning right now
                     user.uniqueId?.let { uniqueId ->
                         deleteFilesFromFirebaseStorage(context, uniqueId) {
@@ -2302,23 +2302,28 @@ internal class ScannerActivity : AppCompatActivity() {
         callback: (Boolean) -> Unit
     ) {
         val dirPath = context.filesDir.path + "/${uniqueId}/"
-        val files = File(dirPath)
-        if (files.listFiles().isNullOrEmpty()) {
+        val dir = File(dirPath)
+
+        // Only count files that end with .dat
+        val datFiles = dir.listFiles { file ->
+            file.isFile && file.extension.equals("dat", ignoreCase = true)
+        }
+
+        if (datFiles.isNullOrEmpty()) {
             println("doesFileExistsInLocalStorage ----- files not found locally.")
             callback(false)
             return
         }
-        if ((files.listFiles()?.size ?: 0) <= 1 || (files.listFiles()?.size ?: 0) > 2) {
-            println("doesFileExistsInLocalStorage ----- deleting files")
+
+        if (datFiles.size != 2) {
+            println("doesFileExistsInLocalStorage ----- deleting files, found ${datFiles.size} .dat file(s) instead of 2")
             deleteFilesFromFirebaseStorage(context, uniqueId) {
-                deleteFolder(files)
-                callback(files.isDirectory && !files.listFiles().isNullOrEmpty())
+                deleteFolder(dir)
+                callback(false)
             }
         } else {
-            val doesExists = files.isDirectory && !files.listFiles()
-                .isNullOrEmpty() && files.listFiles()?.size == 2
-            println("doesFileExistsInLocalStorage ----- $doesExists")
-            callback(doesExists)
+            println("doesFileExistsInLocalStorage ----- true")
+            callback(true)
         }
     }
 

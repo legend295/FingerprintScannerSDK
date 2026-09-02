@@ -27,6 +27,7 @@ import com.nextbiometrics.system.NextBiometricsException
 import com.scanner.app.ScannerApp
 import com.scanner.updated.model.ReaderResult
 import com.scanner.updated.model.ScannerEvent
+import com.scanner.utils.IsoTemplate
 import com.scanner.utils.KeyStorePortable
 import com.scanner.utils.NewRelicWrapper.logDebug
 import com.scanner.utils.NewRelicWrapper.logError
@@ -1206,9 +1207,10 @@ internal class FingerprintReaderWrapper(
         return dir.listFiles { f -> f.isFile && f.name.endsWith(TEMPLATE_SUFFIX) }
             ?.mapIndexedNotNull { index, file ->
                 runCatching {
-                    val decrypted = KeyStorePortable.decryptData(file.path, bvn, encKey)
+//                    val decrypted = KeyStorePortable.decryptData(file.path, bvn, encKey)
+                    val decrypted = File(file.path).readBytes()
                     decrypted?.let { bytes ->
-                        val template = ctx.loadTemplate(NBBiometricsTemplateType.ISO, bytes)
+                        val template = ctx.loadTemplate(NBBiometricsTemplateType.ISO, IsoTemplate.sdk(bytes))
                         AbstractMap.SimpleEntry<Any, NBBiometricsTemplate>("Template$index", template)
                     }
                 }.getOrNull()
@@ -1331,8 +1333,8 @@ internal class FingerprintReaderWrapper(
         return try {
             File(templateDir).mkdirs()
 
-            val rawBytes = ctx.saveTemplate(template)
-            val toWrite = KeyStorePortable.encryptData(rawBytes, bvnNumber, encryptionKey)
+            val isoTemplate = IsoTemplate.conformant(ctx.saveTemplate(template))
+//            val toWrite = KeyStorePortable.encryptData(isoTemplate, bvnNumber, encryptionKey)
             /*val toWrite = if (skipFirebaseActions) {
                 rawBytes
             } else {
@@ -1341,7 +1343,7 @@ internal class FingerprintReaderWrapper(
 
             val fileName = buildTimestampedFileName() + "$readerNo-ISO-Template.dat"
             val filePath = "$templateDir$fileName"
-            FileOutputStream(filePath).use { it.write(toWrite) }
+            FileOutputStream(filePath).use { it.write(isoTemplate) }
             logDebug("$tag saveEncryptedTemplate() → saved to $filePath")
             filePath
         } catch (e: Exception) {
